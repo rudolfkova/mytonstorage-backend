@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	MaxRequests     = 30
+	MaxRequests     = 60
 	RateLimitWindow = 60 * time.Second
 )
 

@@ -62,14 +62,14 @@ type filesDb interface {
 }
 
 type Files interface {
-	AddFiles(ctx context.Context, mr *multipart.Reader, size uint64, userAddr string) (bagid string, err error)
+	AddFiles(ctx context.Context, mr *multipart.Reader, size uint64, userAddr string) (info v1.UnpaidBagsResponse, err error)
 	DeleteBag(ctx context.Context, bagID string, userAddr string) error
 	MarkBagAsPaid(ctx context.Context, bagID, userAddress, storageContract string) (err error)
 	GetUnpaidBags(ctx context.Context, userAddr string) (info v1.UnpaidBagsResponse, err error)
 	GetBagsInfoShort(ctx context.Context, contracts []string) (info []v1.BagInfoShort, err error)
 }
 
-func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint64, userAddr string) (bagid string, err error) {
+func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint64, userAddr string) (info v1.UnpaidBagsResponse, err error) {
 	log := s.logger.With(
 		slog.String("method", "AddFiles"),
 		slog.Uint64("size", size),
@@ -86,21 +86,21 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 
 	if !canUpload {
 		err = models.NewAppError(models.BadRequestErrorCode, "you have unpaid bags")
-		return
+		return info, err
 	}
 
 	err = s.validateAvailableSpace(ctx, size)
 	if err != nil {
 		log.Error("Not enough disk space", slog.Any("error", err))
 		err = models.NewAppError(models.ServiceUnavailableCode, "")
-		return
+		return info, err
 	}
 
 	maxFilesCount, err := s.getLimits(ctx)
 	if err != nil {
 		log.Error("Failed to get limits", slog.Any("error", err))
 		err = models.NewAppError(models.InternalServerErrorCode, "")
-		return
+		return info, err
 	}
 
 	// Make dir
@@ -108,14 +108,14 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 	if uErr != nil {
 		log.Error("Failed to generate UUID", slog.Any("error", uErr))
 		err = models.NewAppError(models.InternalServerErrorCode, "")
-		return
+		return info, err
 	}
 
 	dstPath := filepath.Join(s.storageDir, id.String())
 	if oErr := os.MkdirAll(dstPath, 0755); oErr != nil {
 		log.Error("Failed to create directory", slog.Any("error", oErr))
 		err = models.NewAppError(models.InternalServerErrorCode, "")
-		return
+		return info, err
 	}
 
 	// Remove the directory if handling an error
@@ -139,7 +139,7 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 		}
 		if err != nil {
 			log.Error("failed to read part", slog.Any("error", err))
-			return "", fiber.NewError(fiber.StatusBadRequest, "invalid multipart")
+			return info, fiber.NewError(fiber.StatusBadRequest, "invalid multipart")
 		}
 
 		name := part.FormName()
@@ -150,7 +150,7 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 		if maxFilesCount > 0 && fileCount >= maxFilesCount {
 			msg := fmt.Sprintf("too many files (max %d)", maxFilesCount)
 			log.Error(msg, "error", err, "file_count", fileCount)
-			return "", fiber.NewError(fiber.StatusBadRequest, msg)
+			return info, fiber.NewError(fiber.StatusBadRequest, msg)
 		}
 
 		lastFileName = part.Header.Get("Content-Disposition")
@@ -161,7 +161,7 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 		lastFileName, err = sanitizePath(lastFileName)
 		if err != nil {
 			log.Error("Failed to sanitize filename", "error", err, "filename", lastFileName)
-			return "", fiber.NewError(fiber.StatusBadRequest, "invalid filename")
+			return info, fiber.NewError(fiber.StatusBadRequest, "invalid filename")
 		}
 
 		// Write file to disk
@@ -172,7 +172,7 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 			if err != nil {
 				msg := fmt.Sprintf("failed to read file %s part", lastFileName)
 				log.Error(msg, "error", err, "filename", lastFileName)
-				return "", fiber.NewError(fiber.StatusBadRequest, msg)
+				return info, fiber.NewError(fiber.StatusBadRequest, msg)
 			}
 
 			if strings.Contains(lastFileName, "/") || strings.Contains(lastFileName, "\\") {
@@ -187,13 +187,13 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 			err = saveFileToDisk(dstPath, lastFileName, fileData)
 			if err != nil {
 				log.Error("failed to save file to disk", "error", err, "filename", lastFileName)
-				return "", fiber.NewError(fiber.StatusInternalServerError, "internal error")
+				return info, fiber.NewError(fiber.StatusInternalServerError, "internal error")
 			}
 		} else if name == "description" && description == "" {
 			buf := new(bytes.Buffer)
 			_, err := io.CopyN(buf, part, 10<<20)
 			if err != nil && err != io.EOF {
-				return "", fiber.NewError(fiber.StatusBadRequest, "description too large")
+				return info, fiber.NewError(fiber.StatusBadRequest, "description too large")
 			}
 
 			description = buf.String()
@@ -207,7 +207,7 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 	if fileCount == 0 {
 		msg := "no files found"
 		log.Error(msg, "error", err)
-		return "", fiber.NewError(fiber.StatusBadRequest, msg)
+		return info, fiber.NewError(fiber.StatusBadRequest, msg)
 	}
 
 	path := filepath.Join(dstPath, rootDir)
@@ -216,29 +216,41 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 	}
 
 	// Save to TON Storage
-	info, err := s.saveToTONStorage(ctx, path, description, log)
+	bagInfo, err := s.saveToTONStorage(ctx, path, description, log)
 	if err != nil {
-		return "", err
+		return info, err
 	}
 
-	bagid = info.BagID
+	bagid := bagInfo.BagID
 
 	// Save bag info to database
 	err = s.files.AddBag(ctx, db.BagInfo{
 		BagID:       bagid,
 		Description: description,
-		Size:        info.BagSize,
-		FilesSize:   info.Size,
+		Size:        bagInfo.BagSize,
+		FilesSize:   bagInfo.Size,
 	}, userAddr)
 	if err != nil {
 		log.Error("Failed to save bag info to database", "error", err.Error())
 		err = models.NewAppError(models.InternalServerErrorCode, "")
-		return
+		return info, err
 	}
 
 	log.Info("File added successfully", slog.String("bag_id", bagid))
 
-	return
+	info.Bags = []v1.UserBagInfo{
+		{
+			BagID:       bagid,
+			UserAddress: userAddr,
+			CreatedAt:   time.Now().Unix(),
+			Description: description,
+			FilesCount:  bagInfo.FilesCount,
+			BagSize:     bagInfo.BagSize,
+		},
+	}
+	info.FreeStorage = uint64(s.unpaidFilesLifetime.Seconds())
+
+	return info, nil
 }
 
 func (s *service) DeleteBag(ctx context.Context, bagID string, userAddr string) error {

@@ -11,7 +11,7 @@ import (
 )
 
 type files interface {
-	AddFiles(ctx context.Context, mr *multipart.Reader, size uint64, userAddr string) (bagid string, err error)
+	AddFiles(ctx context.Context, mr *multipart.Reader, size uint64, userAddr string) (info v1.UnpaidBagsResponse, err error)
 	DeleteBag(ctx context.Context, bagID string, userAddr string) error
 	MarkBagAsPaid(ctx context.Context, bagID, userAddress, storageContract string) (err error)
 	GetUnpaidBags(ctx context.Context, userAddr string) (info v1.UnpaidBagsResponse, err error)

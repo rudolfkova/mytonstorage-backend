@@ -10,6 +10,7 @@ const (
 	InternalServerErrorCode = http.StatusInternalServerError
 	BadRequestErrorCode     = http.StatusBadRequest
 	UnauthorizedErrorCode   = http.StatusUnauthorized
+	StorageExpiredCode      = http.StatusGone
 	ServiceUnavailableCode  = http.StatusServiceUnavailable
 )
 

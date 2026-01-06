@@ -2,11 +2,13 @@ package httpServer
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"mime"
 	"mime/multipart"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/gofiber/adaptor/v2"
 	"github.com/gofiber/fiber/v2"
@@ -86,14 +88,12 @@ func (h *handler) uploadFiles(c *fiber.Ctx) (err error) {
 	}
 
 	mr := multipart.NewReader(bytes.NewReader(body), boundary)
-	bagid, err := h.files.AddFiles(c.Context(), mr, uint64(totalSize), address)
+	bagsInfo, err := h.files.AddFiles(c.Context(), mr, uint64(totalSize), address)
 	if err != nil {
 		return errorHandler(c, err)
 	}
 
-	return c.JSON(fiber.Map{
-		"bag_id": bagid,
-	})
+	return c.JSON(bagsInfo)
 }
 
 func (h *handler) deleteBag(c *fiber.Ctx) error {
@@ -190,6 +190,11 @@ func (h *handler) GetBagsInfoShort(c *fiber.Ctx) error {
 }
 
 func (h *handler) fetchProvidersOffers(c *fiber.Ctx) error {
+	const (
+		providerRequestTimeout = 16 * time.Second
+		maxProviders           = 50
+	)
+
 	log := h.logger.With(
 		slog.String("method", c.Method()),
 		slog.String("url", c.OriginalURL()),
@@ -201,7 +206,15 @@ func (h *handler) fetchProvidersOffers(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request")
 	}
 
-	resp, err := h.providers.FetchProvidersRates(c.Context(), req)
+	// probably popular method, so we need to limit number of providers here
+	if len(req.Providers) > maxProviders {
+		log.Error("too many providers requested", slog.Int("count", len(req.Providers)))
+		return fiber.NewError(fiber.StatusBadRequest, "too many providers requested")
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(c.Context(), providerRequestTimeout)
+	defer cancel()
+	resp, err := h.providers.FetchProvidersRates(timeoutCtx, req)
 	if err != nil {
 		return errorHandler(c, err)
 	}
@@ -262,6 +275,10 @@ func (h *handler) withdrawBalance(c *fiber.Ctx) error {
 }
 
 func (h *handler) updateProviders(c *fiber.Ctx) error {
+	const (
+		providerRequestTimeout = 16 * time.Second
+	)
+
 	log := h.logger.With(
 		slog.String("method", c.Method()),
 		slog.String("url", c.OriginalURL()),
@@ -273,7 +290,9 @@ func (h *handler) updateProviders(c *fiber.Ctx) error {
 		return fiber.NewError(fiber.StatusBadRequest, "invalid request")
 	}
 
-	rates := h.providers.FetchProvidersRatesBySize(c.Context(), req.Providers, req.BagSize, req.Span)
+	timeoutCtx, cancel := context.WithTimeout(c.Context(), providerRequestTimeout)
+	defer cancel()
+	rates := h.providers.FetchProvidersRatesBySize(timeoutCtx, req.Providers, req.BagSize, req.Span)
 	if len(rates.Offers) != len(req.Providers) {
 		log.Error("not all providers returned offers", slog.Int("expected", len(req.Providers)), slog.Int("received", len(rates.Offers)))
 		return fiber.NewError(fiber.StatusBadRequest, "some providers unavailable")
