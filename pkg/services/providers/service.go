@@ -27,7 +27,8 @@ import (
 
 const (
 	providersLimit         = 256
-	providerRequestTimeout = 7 * time.Second
+	providerRequestTimeout = 14 * time.Second
+	getStorageRatesTimeout = 7 * time.Second
 )
 
 type files interface {
@@ -77,7 +78,7 @@ func (s *service) FetchProvidersRates(ctx context.Context, req v1.OffersRequest)
 		details, bErr := s.storage.GetBag(ctx, req.BagID)
 		if bErr != nil {
 			log.Error("failed to get bag details", slog.String("error", bErr.Error()))
-			err = models.NewAppError(models.ServiceUnavailableCode, "failed to get bag details")
+			err = models.NewAppError(models.StorageExpiredCode, "probably bag is expired")
 			return
 		}
 
@@ -315,7 +316,7 @@ func (s *service) fetchProviderRates(ctx context.Context, providerKey string, ba
 
 	var rates *transport.StorageRatesResponse
 	err = utils.TryNTimes(func() error {
-		timeoutCtx, cancel := context.WithTimeout(ctx, providerRequestTimeout)
+		timeoutCtx, cancel := context.WithTimeout(ctx, getStorageRatesTimeout)
 		defer cancel()
 		rates, err = s.provider.GetStorageRates(timeoutCtx, pk, bagSize)
 		return err
