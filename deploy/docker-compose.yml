@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${DB_USER}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+      POSTGRES_DB: "${DB_NAME}"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  tonutils-storage:
+    build:
+      context: .
+      dockerfile: tonutils-storage.Dockerfile
+      args:
+        TONUTILS_STORAGE_VERSION: "${TONUTILS_STORAGE_VERSION:-v1.5.1}"
+    restart: unless-stopped
+    command:
+      - --daemon
+      - --db
+      - /data/db
+      - --api
+      - 0.0.0.0:13474
+      - --api-login
+      - "${TON_STORAGE_LOGIN}"
+      - --api-password
+      - "${TON_STORAGE_PASSWORD}"
+    ports:
+      - "${TONUTILS_STORAGE_API_PORT:-13474}:13474"
+      - "${TONUTILS_STORAGE_UDP_PORT:-47431}:47431/udp"
+    volumes:
+      - tonstorage_db:/data/db
+      - bags_data:/bags
+
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        BUILD_TAGS: "${BACKEND_BUILD_TAGS:-debug}"
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SYSTEM_PORT: "${BACKEND_PORT:-9092}"
+      DB_HOST: postgres
+      TON_STORAGE_BASE_URL: "http://tonutils-storage:13474"
+      BAGS_DIR_FOR_STORAGE: /bags
+    ports:
+      - "${BACKEND_PORT:-9092}:${BACKEND_PORT:-9092}"
+      - "${SYSTEM_ADNL_PORT:-16167}:${SYSTEM_ADNL_PORT:-16167}/udp"
+    volumes:
+      - bags_data:/bags
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tonutils-storage:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  tonstorage_db:
+  bags_data:

@@ -1,0 +1,96 @@
+version: "3"
+
+dotenv:
+  - deploy/.env
+
+tasks:
+  build:
+    desc: Build backend binary locally (debug, for frontend on :3000)
+    cmds:
+      - mkdir -p bin
+      - go build -tags=debug -trimpath -o bin/mtpo-backend ./cmd
+
+  run:
+    desc: Run backend locally (expects postgres + tonutils-storage from task deploy:up)
+    cmds:
+      - go run -tags=debug ./cmd
+
+  deploy:init:
+    desc: Create deploy/.env from example and generate SYSTEM_PRIVATE_KEY if needed
+    cmds:
+      - mkdir -p deploy
+      - |
+        if [ ! -f deploy/.env ]; then
+          cp deploy/.env.example deploy/.env
+          echo "Created deploy/.env from deploy/.env.example"
+        else
+          echo "deploy/.env already exists"
+        fi
+      - |
+        if grep -q '^SYSTEM_PRIVATE_KEY=replace-with-openssl-rand-hex-32' deploy/.env; then
+          KEY="$(openssl rand -hex 32)"
+          sed -i "s/^SYSTEM_PRIVATE_KEY=.*/SYSTEM_PRIVATE_KEY=${KEY}/" deploy/.env
+          echo "Generated SYSTEM_PRIVATE_KEY in deploy/.env"
+        fi
+
+  deploy:up:
+    desc: Build and start local dev stack (postgres + tonutils-storage + backend)
+    deps:
+      - deploy:init
+    cmds:
+      - docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+
+  deploy:down:
+    desc: Stop local dev stack (keep volumes)
+    cmds:
+      - docker compose --env-file deploy/.env -f deploy/docker-compose.yml down
+
+  deploy:reset:
+    desc: Stop local dev stack and remove volumes (postgres + bags data)
+    cmds:
+      - docker compose --env-file deploy/.env -f deploy/docker-compose.yml down -v
+
+  deploy:ps:
+    desc: Show compose service status
+    cmds:
+      - docker compose --env-file deploy/.env -f deploy/docker-compose.yml ps
+
+  deploy:logs:
+    desc: Follow logs for all compose services
+    cmds:
+      - docker compose --env-file deploy/.env -f deploy/docker-compose.yml logs -f
+
+  deploy:logs:backend:
+    desc: Follow backend logs only
+    cmds:
+      - docker compose --env-file deploy/.env -f deploy/docker-compose.yml logs -f backend
+
+  deploy:health:
+    desc: Check backend /health endpoint
+    cmds:
+      - |
+        PORT="${BACKEND_PORT:-9092}"
+        curl -fsS "http://127.0.0.1:${PORT}/health"
+        echo
+
+  deploy:storage:list:
+    desc: List bags in tonutils-storage via HTTP API
+    cmds:
+      - |
+        set -euo pipefail
+        : "${TON_STORAGE_LOGIN:?set in deploy/.env}"
+        : "${TON_STORAGE_PASSWORD:?set in deploy/.env}"
+        PORT="${TONUTILS_STORAGE_API_PORT:-13474}"
+        curl -fsS -u "${TON_STORAGE_LOGIN}:${TON_STORAGE_PASSWORD}" \
+          "http://127.0.0.1:${PORT}/api/v1/list"
+
+  mod:tidy:
+    desc: go mod tidy
+    cmds:
+      - go mod tidy
+
+  test:build:
+    desc: Verify release and debug builds compile
+    cmds:
+      - go build -o /dev/null ./cmd
+      - go build -tags=debug -o /dev/null ./cmd

@@ -6,107 +6,92 @@ Backend-сервис для mytonstorage.org.
 
 ## Описание
 
-Backend для загрзуки и управления файлами в TON Storage:
+Backend для загрузки и управления файлами в TON Storage:
 - Загрузка файлов в TON Storage
 - Управление жизненным циклом storage-контрактов (инициализация, пополнение, закрытие, обновление провайдеров)
-- Автоизация через TON Connect
+- Авторизация через TON Connect
 - Мониторит storage-контракты и уведомляет провайдеров о новых bags для загрузки
 - REST API эндпоинты для фронтенд-приложения
 - Собирает метрики через **Prometheus**
 
-## Установка и настройка
+## Локальная разработка (Docker)
 
-Для начала нам потребуется чистый сервер на Debian 12 с рут пользователем.
+**Нужно:** [Docker](https://docs.docker.com/), [Task](https://taskfile.dev), Go 1.25+ (для локальной сборки вне контейнера).
 
-1. **Склонируйте скрипт для подключения по ключу**
-
-Вместо логина по паролю, скрипт безопасности требует использовать логин по ключу. Этот скрипт нужно запускать на рабочей машине, он не потребует sudo, а только пробросит ключи для доступа.
+Стек в контейнерах: **PostgreSQL**, **tonutils-storage** (v1.5.1), **backend**.
 
 ```bash
-wget https://raw.githubusercontent.com/dearjohndoe/mytonstorage-backend/refs/heads/master/scripts/init_server_connection.sh
+# Поднять стек (создаст deploy/.env при первом запуске)
+task deploy:up
+
+# Проверить health
+task deploy:health
+
+# Логи
+task deploy:logs
+
+# Остановить
+task deploy:down
+
+# Остановить и удалить volumes (БД + bags)
+task deploy:reset
 ```
 
-2. **Пробрасываем ключи и закрываем доступ по паролю**
+API: `http://localhost:9092` (порт задаётся `BACKEND_PORT` в `deploy/.env`).
+
+Конфиг: скопируй `deploy/.env.example` → `deploy/.env` или запусти `task deploy:init`.  
+`DB_USER` должен быть **pguser** — так задано в `db/init.sql`.
+
+### Фронтенд
+
+Backend в dev-сборке (`BACKEND_BUILD_TAGS=debug`) отдаёт CORS для `http://localhost:3000`.
+
+1. Клонируй [mytonstorage-org](https://github.com/dearjohndoe/mytonstorage-org)
+2. В `lib/api.ts` укажи `http://localhost:9092` вместо prod URL
+3. `npm install && npm run dev`
+4. `SYSTEM_HOST=localhost` в `deploy/.env` (для TON Connect proof)
+
+## Локальный запуск без Docker
 
 ```bash
-USERNAME=root PASSWORD=supersecretpassword HOST=123.45.67.89 bash init_server_connection.sh
+task build          # bin/mtpo-backend
+task test:build     # проверка compile
 ```
 
-В случае ошибки man-in-the-middle, возможно вам стоит удалить known_hosts.
-
-3. **Заходим на удаленную машину и качаем скрипт установки**
-
-```bash
-ssh root@123.45.67.89 # Если требует пароль, то предыдущий шаг завершился с ошибкой.
-
-wget https://raw.githubusercontent.com/dearjohndoe/mytonstorage-backend/refs/heads/master/scripts/setup_server.sh
-```
-
-4. **Запускаем настройку и установку сервера**
-
-Займет несколько минут.
-
-```bash
-PG_USER=pguser PG_PASSWORD=pgpassword PG_DB=storagedb NEWFRONTENDUSER=janefrontside  NEWSUDOUSER=janedoe NEWUSER_PASSWORD=newpassword  INSTALL_SSL=false APP_USER=appuser API_PASSWORD=apipassword bash setup_server.sh
-```
-
-По завершении выведет полезную информацию по использованию сервера.
-
-
-## Разработка:
-### Настройка VS Code
-Создайте `.vscode/launch.json`:
-```json
-{
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Launch Package",
-            "type": "go",
-            "request": "launch",
-            "mode": "auto",
-            "program": "${workspaceFolder}/cmd",
-            "buildFlags": "-tags=debug",    // для обработки OPTIONS запросов без nginx при разработке
-            "env": {...}
-        }
-    ]
-}
-```
+Для полного flow нужны Postgres и tonutils-storage — проще через `task deploy:up`.
 
 ## Структура проекта
 
 ```
-├── cmd/                   # Точка входа приложения, конфиги, инициализация
+├── cmd/                   # Точка входа, конфиг, инициализация
 ├── pkg/                   # Пакеты приложения
-│   ├── cache/             # Кастомный кеш
-│   ├── clients/           # Клиенты TON blockchain и TON Storage
-│   ├── httpServer/        # Обработчики и маршруты Fiber сервера
-│   ├── models/            # Модели данных БД и API
-│   ├── repositories/      # Слой базы данных (PostgreSQL)
-│   ├── services/          # Бизнес-логика (auth, files, contracts, providers)
-│   └── workers/           # Фоновые воркеры
-├── db/                    # Схема базы данных
-├── scripts/               # Скрипты установки и утилиты
+│   ├── cache/
+│   ├── clients/           # TON blockchain и TON Storage HTTP
+│   ├── httpServer/
+│   ├── models/
+│   ├── repositories/
+│   ├── services/
+│   └── workers/
+├── db/                    # Схема PostgreSQL
+├── deploy/                # Docker Compose, .env.example
+├── Dockerfile
+└── Taskfile.yml
 ```
 
 ## API эндпоинты
 
-Сервер предоставляет REST API эндпоинты для:
 - Логин через TON Connect
-- Работа с файлами: загрузка, удаление, отслеживание неоплаченных bags, краткая инфа о bags
-- Управление контрактами: создание, пополнение баланса, вывод денег, смена провайдеров
-- Получение предложений от провайдеров и их тарифов
+- Файлы: загрузка, удаление, unpaid bags, краткая инфа
+- Контракты: init, topup, withdraw, смена провайдеров
+- Провайдеры: offers (тарифы)
 
 ## Воркеры
 
-В фоне крутятся воркеры, которые следят за порядком:
-- **Files Worker**: Чистит неоплаченные и старые bags, дергает провайдеров на загрузку, проверяет статус
-- **Cleaner Worker**: Чистит базу данных от устаревшей информации
+- **Files Worker**: unpaid/expired bags, уведомление провайдеров, проверка загрузки
+- **Cleaner Worker**: очистка устаревших данных в БД
 
 ## Лицензия
 
 Apache-2.0
 
-
-
-Этот проект был создан по заказу участника сообщества TON Foundation.
+Проект создан по заказу участника сообщества TON Foundation.
