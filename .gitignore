@@ -9,3 +9,4 @@
 /.env.*
 /deploy/.env
 /bin/
+/cloudflared

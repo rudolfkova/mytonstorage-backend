@@ -22,8 +22,11 @@ func (h *handler) RegisterRoutes() {
 	// On server side nginx or other reverse proxy should handle CORS
 	// and OPTIONS requests, but for debug purposes we handle it here.
 	h.server.Use(func(c *fiber.Ctx) error {
-		// Always set CORS headers
-		c.Set("Access-Control-Allow-Origin", "http://localhost:3000")
+		origin := c.Get("Origin")
+		switch origin {
+		case "http://localhost:3000", "http://127.0.0.1:3000":
+			c.Set("Access-Control-Allow-Origin", origin)
+		}
 		c.Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		requestedHeaders := c.Get("Access-Control-Request-Headers")
 		if requestedHeaders != "" {

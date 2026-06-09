@@ -80,6 +80,8 @@ task test:build     # проверка compile
 
 ## API эндпоинты
 
+Подробное описание всех ручек: [docs/API.ru.md](docs/API.ru.md)
+
 - Логин через TON Connect
 - Файлы: загрузка, удаление, unpaid bags, краткая инфа
 - Контракты: init, topup, withdraw, смена провайдеров
