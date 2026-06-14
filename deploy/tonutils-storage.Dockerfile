@@ -22,10 +22,12 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /out/tonutils-storage /usr/local/bin/tonutils-storage
+COPY tonutils-storage-entrypoint.sh /usr/local/bin/tonutils-storage-entrypoint.sh
 
-RUN mkdir -p /data/db /bags
+RUN chmod +x /usr/local/bin/tonutils-storage-entrypoint.sh && \
+    mkdir -p /data/db /bags
 
 EXPOSE 13474 47431/udp
 
-ENTRYPOINT ["/usr/local/bin/tonutils-storage"]
+ENTRYPOINT ["/usr/local/bin/tonutils-storage-entrypoint.sh"]
 CMD ["--daemon", "--db", "/data/db", "--api", "0.0.0.0:13474"]

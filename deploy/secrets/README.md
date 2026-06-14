@@ -22,3 +22,5 @@ Set in `deploy/.env`:
 4. Verify: `POST /api/v1/providers/offers`, then upload → paid → notify logs without DHT timeout
 
 Backend no longer listens on UDP 16167. `tonutils-storage` UDP 47431 remains required for bag overlay.
+
+Set `TONUTILS_STORAGE_EXTERNAL_IP` in `deploy/.env` to the host's public IPv4 or DNS name (e.g. `vm05.proxmox.ip2dns.net`). The storage entrypoint patches `config.json` on start (`ExternalIP` + `ListenAddr`). Without it, bags seed locally but providers cannot find the node in DHT (`peers: 0`).

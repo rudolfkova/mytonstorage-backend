@@ -24,6 +24,9 @@ services:
       args:
         TONUTILS_STORAGE_VERSION: "${TONUTILS_STORAGE_VERSION:-v1.5.1}"
     restart: unless-stopped
+    environment:
+      TONUTILS_STORAGE_EXTERNAL_IP: "${TONUTILS_STORAGE_EXTERNAL_IP:-}"
+      TONUTILS_STORAGE_UDP_PORT: "${TONUTILS_STORAGE_UDP_PORT:-47431}"
     command:
       - --daemon
       - --db
@@ -36,7 +39,7 @@ services:
       - "${TON_STORAGE_PASSWORD}"
     ports:
       - "${TONUTILS_STORAGE_API_PORT:-13474}:13474"
-      - "${TONUTILS_STORAGE_UDP_PORT:-47431}:47431/udp"
+      - "${TONUTILS_STORAGE_UDP_PORT:-47431}:${TONUTILS_STORAGE_UDP_PORT:-47431}/udp"
     volumes:
       - tonstorage_db:/data/db
       - bags_data:/bags
