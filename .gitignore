@@ -8,5 +8,6 @@
 /.env
 /.env.*
 /deploy/.env
+.contracts-build/
 /bin/
 /cloudflared

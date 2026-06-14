@@ -3,7 +3,8 @@ FROM golang:1.25-bookworm AS builder
 WORKDIR /src
 
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
+COPY .contracts-build /contracts
+RUN go mod edit -replace mytonprovider-contracts=/contracts && \
     go mod download
 
 COPY . .
@@ -22,6 +23,6 @@ RUN apt-get update && \
 
 COPY --from=builder /out/mtpo-backend /usr/local/bin/mtpo-backend
 
-EXPOSE 9092 16167/udp
+EXPOSE 9092
 
 ENTRYPOINT ["/usr/local/bin/mtpo-backend"]

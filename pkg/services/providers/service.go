@@ -9,16 +9,15 @@ import (
 	"math/big"
 	"math/rand"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/xssnick/tonutils-go/address"
 	"github.com/xssnick/tonutils-go/tlb"
 	"github.com/xssnick/tonutils-go/tvm/cell"
 	"github.com/xssnick/tonutils-storage-provider/pkg/contract"
-	"github.com/xssnick/tonutils-storage-provider/pkg/transport"
 	"github.com/xssnick/tonutils-storage/provider"
 
+	"mytonstorage-backend/pkg/clients/agentrpc"
 	tonstorage "mytonstorage-backend/pkg/clients/ton-storage"
 	"mytonstorage-backend/pkg/models"
 	v1 "mytonstorage-backend/pkg/models/api/v1"
@@ -42,7 +41,7 @@ type storage interface {
 type service struct {
 	files               files
 	storage             storage
-	provider            *transport.Client
+	agent               *agentrpc.Client
 	maxAllowedSpan      uint64
 	unpaidFilesLifetime time.Duration
 	logger              *slog.Logger
@@ -91,37 +90,43 @@ func (s *service) FetchProvidersRates(ctx context.Context, req v1.OffersRequest)
 }
 
 func (s *service) FetchProvidersRatesBySize(ctx context.Context, providers []string, bagSize uint64, span uint32) (resp v1.ProviderRatesResponse) {
-	wg := sync.WaitGroup{}
-	mu := sync.Mutex{}
-
-	for _, provider := range providers {
-		wg.Add(1)
-
-		func() {
-			defer wg.Done()
-
-			timeoutCtx, cancel := context.WithTimeout(ctx, providerRequestTimeout)
-			defer cancel()
-
-			rate, reason := s.fetchProviderRates(timeoutCtx, provider, bagSize, span)
-			if reason != "" {
-				mu.Lock()
-				resp.Declines = append(resp.Declines, v1.ProviderDecline{
-					ProviderKey: provider,
-					Reason:      reason,
-				})
-				mu.Unlock()
-
-				return
-			}
-
-			mu.Lock()
-			resp.Offers = append(resp.Offers, *rate)
-			mu.Unlock()
-		}()
+	if len(providers) == 0 {
+		return
 	}
 
-	wg.Wait()
+	timeoutCtx, cancel := context.WithTimeout(ctx, providerRequestTimeout)
+	defer cancel()
+
+	ratesByKey, err := s.agent.GetStorageRates(timeoutCtx, providers, bagSize)
+	if err != nil {
+		for _, providerKey := range providers {
+			resp.Declines = append(resp.Declines, v1.ProviderDecline{
+				ProviderKey: providerKey,
+				Reason:      "can't fetch rates",
+			})
+		}
+		return
+	}
+
+	for _, providerKey := range providers {
+		row, ok := ratesByKey[strings.ToUpper(strings.TrimSpace(providerKey))]
+		if !ok {
+			resp.Declines = append(resp.Declines, v1.ProviderDecline{
+				ProviderKey: providerKey,
+				Reason:      "can't fetch rates",
+			})
+			continue
+		}
+		offer, reason := s.offerFromRatesRow(providerKey, bagSize, span, row)
+		if reason != "" {
+			resp.Declines = append(resp.Declines, v1.ProviderDecline{
+				ProviderKey: providerKey,
+				Reason:      reason,
+			})
+			continue
+		}
+		resp.Offers = append(resp.Offers, *offer)
+	}
 
 	return
 }
@@ -307,20 +312,17 @@ func (s *service) fetchProviderRates(ctx context.Context, providerKey string, ba
 		"bag_size", bagSize,
 		"provider_key", providerKey)
 
-	pk, err := utils.ToHashBytes(providerKey)
-	if err != nil {
-		log.Error("failed to parse provider hash", slog.String("error", err.Error()))
-		reason = "invalid pubkey"
-		return
-	}
-
-	var rates *transport.StorageRatesResponse
-	err = utils.TryNTimes(func() error {
-		timeoutCtx, cancel := context.WithTimeout(ctx, getStorageRatesTimeout)
-		defer cancel()
-		rates, err = s.provider.GetStorageRates(timeoutCtx, pk, bagSize)
-		return err
-	}, 3)
+	ratesByKey, err := func() (map[string]agentrpc.StorageRatesRow, error) {
+		var out map[string]agentrpc.StorageRatesRow
+		rErr := utils.TryNTimes(func() error {
+			timeoutCtx, cancel := context.WithTimeout(ctx, getStorageRatesTimeout)
+			defer cancel()
+			var gErr error
+			out, gErr = s.agent.GetStorageRates(timeoutCtx, []string{providerKey}, bagSize)
+			return gErr
+		}, 3)
+		return out, rErr
+	}()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			log.Error("provider rates request timed out", slog.String("error", err.Error()))
@@ -333,10 +335,39 @@ func (s *service) fetchProviderRates(ctx context.Context, providerKey string, ba
 		return
 	}
 
-	if rates == nil {
-		log.Error("provider returned empty rates")
-		reason = "not available"
+	row, ok := ratesByKey[strings.ToUpper(strings.TrimSpace(providerKey))]
+	if !ok {
+		log.Error("provider missing from agent response")
+		reason = "can't fetch rates"
 		return
+	}
+
+	return s.offerFromRatesRow(providerKey, bagSize, span, row)
+}
+
+func (s *service) offerFromRatesRow(providerKey string, bagSize uint64, span uint32, row agentrpc.StorageRatesRow) (offer *v1.ProviderOffer, reason string) {
+	if !row.OK {
+		reason = "can't fetch rates"
+		if row.Details != "" {
+			reason = row.Details
+		}
+		return
+	}
+
+	rates := struct {
+		Available        bool
+		RatePerMBDay     []byte
+		MinBounty        []byte
+		SpaceAvailableMB uint64
+		MinSpan          uint32
+		MaxSpan          uint32
+	}{
+		Available:        row.Available,
+		RatePerMBDay:     row.RatePerMBDay,
+		MinBounty:        row.MinBounty,
+		SpaceAvailableMB: row.SpaceAvailableMB,
+		MinSpan:          row.MinSpan,
+		MaxSpan:          row.MaxSpan,
 	}
 
 	if rates.SpaceAvailableMB < bagSize {
@@ -359,8 +390,7 @@ func (s *service) fetchProviderRates(ctx context.Context, providerKey string, ba
 		SpaceAvailableMB: rates.SpaceAvailableMB,
 		MinSpan:          rates.MinSpan,
 		MaxSpan:          rates.MaxSpan,
-
-		Size: bagSize,
+		Size:             bagSize,
 	}
 
 	o := provider.CalculateBestProviderOffer(&p)
@@ -370,7 +400,6 @@ func (s *service) fetchProviderRates(ctx context.Context, providerKey string, ba
 		PricePerDay:   o.PerDayNano.Uint64(),
 		PricePerProof: o.PerProofNano.Uint64(),
 		PricePerMB:    o.RatePerMBNano.Uint64(),
-
 		Provider: v1.ProviderContractData{
 			Key:          strings.ToUpper(providerKey),
 			MinBounty:    tlb.FromNanoTON(new(big.Int).SetBytes(rates.MinBounty)).String(),
@@ -383,9 +412,9 @@ func (s *service) fetchProviderRates(ctx context.Context, providerKey string, ba
 	return
 }
 
-func NewService(provider *transport.Client, files files, storage storage, maxAllowedSpanDays uint32, unpaidFilesLifetime time.Duration, logger *slog.Logger) Providers {
+func NewService(agent *agentrpc.Client, files files, storage storage, maxAllowedSpanDays uint32, unpaidFilesLifetime time.Duration, logger *slog.Logger) Providers {
 	return &service{
-		provider:            provider,
+		agent:               agent,
 		maxAllowedSpan:      uint64(maxAllowedSpanDays) * 24 * 60 * 60,
 		unpaidFilesLifetime: unpaidFilesLifetime,
 		files:               files,

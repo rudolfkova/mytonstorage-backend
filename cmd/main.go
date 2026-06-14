@@ -20,6 +20,7 @@ import (
 
 	tonclient "mytonstorage-backend/pkg/clients/ton"
 	tonstorage "mytonstorage-backend/pkg/clients/ton-storage"
+	"mytonstorage-backend/pkg/clients/agentrpc"
 	"mytonstorage-backend/pkg/httpServer"
 	filesRepository "mytonstorage-backend/pkg/repositories/files"
 	providersRepository "mytonstorage-backend/pkg/repositories/providers"
@@ -145,11 +146,21 @@ func run() (err error) {
 		return
 	}
 
-	_, providerClient, err := newProviderClient(context.Background(), config.TON.ConfigURL, config.System.ADNLPort, config.System.Key)
+	agentRPC, err := agentrpc.New(agentrpc.Config{
+		Endpoints:      agentrpc.ParseEndpointsCSV(config.Agents.Endpoints),
+		AuthToken:      config.Agents.AuthToken,
+		CACertFile:       config.Agents.CACertFile,
+		RequestTimeout: time.Duration(config.Agents.RequestTimeoutMs) * time.Millisecond,
+	})
 	if err != nil {
-		logger.Error("failed to create provider client", slog.String("error", err.Error()))
+		logger.Error("failed to create agent RPC client", slog.String("error", err.Error()))
 		return
 	}
+	defer func() {
+		if cErr := agentRPC.Close(); cErr != nil {
+			logger.Warn("failed to close agent RPC client", slog.String("error", cErr.Error()))
+		}
+	}()
 
 	creds := tonstorage.Credentials{
 		Login:    config.TONStorage.Login,
@@ -165,7 +176,7 @@ func run() (err error) {
 		filesRepo,
 		providerRepo,
 		storage,
-		providerClient,
+		agentRPC,
 		tonContractsClient,
 		config.System.UnpaidFilesLifetimePrivate,
 		config.System.PaidFilesLifetime,
@@ -175,7 +186,7 @@ func run() (err error) {
 
 	// Services
 	providersSvc := providersService.NewService(
-		providerClient,
+		agentRPC,
 		filesRepo,
 		storage,
 		config.System.MaxAllowedSpanDays,

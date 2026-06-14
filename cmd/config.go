@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/ed25519"
 	"log"
 	"log/slog"
 	"time"
@@ -17,20 +16,18 @@ var logLevels = map[uint8]slog.Level{
 }
 
 type System struct {
-	Port                       string             `env:"SYSTEM_PORT" envDefault:"9090"`
-	Host                       string             `env:"SYSTEM_HOST" required:"true"`
-	Key                        ed25519.PrivateKey `env:"SYSTEM_KEY" required:"false"`
-	AuthPrivateKey             string             `env:"SYSTEM_PRIVATE_KEY" required:"true"`
-	AuthSessionDuration        time.Duration      `env:"SYSTEM_AUTH_SESSION_DURATION" envDefault:"24h"`
-	ADNLPort                   string             `env:"SYSTEM_ADNL_PORT" envDefault:"16167"`
-	AdminAuthTokens            string             `env:"SYSTEM_ADMIN_AUTH_TOKENS" envDefault:""`
-	LogLevel                   uint8              `env:"SYSTEM_LOG_LEVEL" envDefault:"1"` // 0 - debug, 1 - info, 2 - warn, 3 - error
-	StoreHistoryDays           int                `env:"SYSTEM_STORE_HISTORY_DAYS" envDefault:"90"`
-	UnpaidFilesLifetimePrivate time.Duration      `env:"SYSTEM_UNPAID_FILES_LIFETIME" envDefault:"20m"`
-	PaidFilesLifetime          time.Duration      `env:"SYSTEM_PAID_FILES_LIFETIME" envDefault:"48h"`
-	UnpaidFilesLifetimePublic  time.Duration      `env:"SYSTEM_UNPAID_FILES_LIFETIME_PUBLIC" envDefault:"15m"`
-	TotalDiskSpaceAvailable    uint64             `env:"SYSTEM_TOTAL_DISK_SPACE_AVAILABLE" envDefault:"644245094400"` // 600 GB
-	MaxAllowedSpanDays         uint32             `env:"SYSTEM_MAX_ALLOWED_SPAN_DAYS" envDefault:"7"`
+	Port                       string        `env:"SYSTEM_PORT" envDefault:"9090"`
+	Host                       string        `env:"SYSTEM_HOST" required:"true"`
+	AuthPrivateKey             string        `env:"SYSTEM_PRIVATE_KEY" required:"true"`
+	AuthSessionDuration        time.Duration `env:"SYSTEM_AUTH_SESSION_DURATION" envDefault:"24h"`
+	AdminAuthTokens            string        `env:"SYSTEM_ADMIN_AUTH_TOKENS" envDefault:""`
+	LogLevel                   uint8         `env:"SYSTEM_LOG_LEVEL" envDefault:"1"` // 0 - debug, 1 - info, 2 - warn, 3 - error
+	StoreHistoryDays           int           `env:"SYSTEM_STORE_HISTORY_DAYS" envDefault:"90"`
+	UnpaidFilesLifetimePrivate time.Duration `env:"SYSTEM_UNPAID_FILES_LIFETIME" envDefault:"20m"`
+	PaidFilesLifetime          time.Duration `env:"SYSTEM_PAID_FILES_LIFETIME" envDefault:"48h"`
+	UnpaidFilesLifetimePublic  time.Duration `env:"SYSTEM_UNPAID_FILES_LIFETIME_PUBLIC" envDefault:"15m"`
+	TotalDiskSpaceAvailable    uint64        `env:"SYSTEM_TOTAL_DISK_SPACE_AVAILABLE" envDefault:"644245094400"` // 600 GB
+	MaxAllowedSpanDays         uint32        `env:"SYSTEM_MAX_ALLOWED_SPAN_DAYS" envDefault:"7"`
 }
 
 type Metrics struct {
@@ -50,6 +47,13 @@ type TON struct {
 	ConfigURL string `env:"TON_CONFIG_URL" required:"true" envDefault:"https://ton-blockchain.github.io/global.config.json"`
 }
 
+type Agents struct {
+	Endpoints        string `env:"AGENT_ENDPOINTS" envDefault:""`
+	AuthToken        string `env:"AGENT_AUTH_TOKEN" envDefault:""`
+	CACertFile       string `env:"AGENT_CA_CERT_FILE" envDefault:""`
+	RequestTimeoutMs uint32 `env:"AGENT_RPC_TIMEOUT_MS" envDefault:"30000"`
+}
+
 type Postgress struct {
 	Host     string `env:"DB_HOST" required:"true"`
 	Port     string `env:"DB_PORT" required:"true"`
@@ -60,6 +64,7 @@ type Postgress struct {
 
 type Config struct {
 	System     System
+	Agents     Agents
 	TONStorage TONStorage
 	Metrics    Metrics
 	TON        TON
@@ -83,11 +88,8 @@ func loadConfig() *Config {
 	if err := env.Parse(&cfg.TON); err != nil {
 		log.Fatalf("Failed to parse TON config: %v", err)
 	}
-
-	if cfg.System.Key == nil {
-		_, priv, _ := ed25519.GenerateKey(nil)
-		key := priv.Seed()
-		cfg.System.Key = ed25519.NewKeyFromSeed(key)
+	if err := env.Parse(&cfg.Agents); err != nil {
+		log.Fatalf("Failed to parse agents config: %v", err)
 	}
 
 	return cfg

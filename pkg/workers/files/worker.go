@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/xssnick/tonutils-go/address"
-	"github.com/xssnick/tonutils-storage-provider/pkg/transport"
 
+	"mytonstorage-backend/pkg/clients/agentrpc"
 	tonclient "mytonstorage-backend/pkg/clients/ton"
 	"mytonstorage-backend/pkg/models/db"
 )
@@ -47,11 +47,18 @@ type contractsClient interface {
 	GetProvidersInfo(ctx context.Context, addrs []string) (contractsProviders []tonclient.StorageContractProviders, err error)
 }
 
+type storageCheckMode int
+
+const (
+	storageCheckNotify storageCheckMode = iota
+	storageCheckDownload
+)
+
 type filesWorker struct {
 	filesDb             filesDb
 	providersDb         providersDb
 	tonstorage          storage
-	provider            *transport.Client
+	agent               *agentrpc.Client
 	contractsClient     contractsClient
 	unpaidFilesLifetime time.Duration
 	paidFilesLifetime   time.Duration
@@ -294,7 +301,7 @@ func (w *filesWorker) TriggerProvidersDownload(ctx context.Context) (interval ti
 		interval = nothingToUpdateInterval
 	}
 
-	notified, failed := w.checkProvidersStorageInfo(ctx, providersToNotify)
+	notified, failed := w.runStorageChecks(ctx, providersToNotify, storageCheckNotify)
 
 	// Defer increasing attempts if there's an error
 	defer func() {
@@ -346,7 +353,7 @@ func (w *filesWorker) DownloadChecker(ctx context.Context) (interval time.Durati
 		interval = nothingToUpdateInterval
 	}
 
-	checked, failed := w.checkProvidersStorageInfo(ctx, providersToCheck)
+	checked, failed := w.runStorageChecks(ctx, providersToCheck, storageCheckDownload)
 
 	if len(failed) > 0 {
 		_ = w.providersDb.IncreaseDownloadChecks(ctx, failed)
@@ -367,62 +374,94 @@ func (w *filesWorker) DownloadChecker(ctx context.Context) (interval time.Durati
 	return
 }
 
-func (w *filesWorker) checkProvidersStorageInfo(ctx context.Context, providers []db.ProviderNotification) (checked []db.ProviderNotification, failed []db.ProviderNotification) {
-	log := w.logger.With("worker", "checkProvidersStorageInfo")
+func (w *filesWorker) runStorageChecks(ctx context.Context, providers []db.ProviderNotification, mode storageCheckMode) (checked []db.ProviderNotification, failed []db.ProviderNotification) {
+	log := w.logger.With("worker", "runStorageChecks")
+	if len(providers) == 0 {
+		return
+	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	queries := make([]agentrpc.StorageInfoQuery, 0, len(providers))
+	indexByKey := make(map[string]int, len(providers))
 
-	for _, provider := range providers {
+	for i, provider := range providers {
 		toProof := r.Uint64() % uint64(math.Max(float64(provider.Size), 1))
-		sc, cErr := address.ParseAddr(provider.StorageContract)
-		if cErr != nil {
+		if _, err := address.ParseAddr(provider.StorageContract); err != nil {
 			log.Error("failed to parse storage contract address",
-				"error", cErr.Error(),
+				"error", err.Error(),
 				"storage_contract", provider.StorageContract)
+			failed = append(failed, provider)
 			continue
 		}
 
-		fErr := func() error {
-			timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
+		key := strings.ToLower(provider.ProviderPubkey) + "|" + provider.StorageContract
+		indexByKey[key] = i
+		queries = append(queries, agentrpc.StorageInfoQuery{
+			ProviderPubkey:  provider.ProviderPubkey,
+			ContractAddress: provider.StorageContract,
+			ByteToProof:     toProof,
+		})
+	}
 
-			providerKey, dErr := hex.DecodeString(provider.ProviderPubkey)
-			if dErr != nil {
-				log.Error("failed to decode provider pubkey",
-					"error", dErr.Error(),
-					"provider_pubkey", provider.ProviderPubkey)
-				return dErr
-			}
+	if len(queries) == 0 {
+		return nil, failed
+	}
 
-			info, rErr := w.provider.RequestStorageInfo(timeoutCtx, providerKey, sc, toProof)
-			if rErr != nil {
-				log.Error("failed to notify provider",
-					"error", rErr.Error(),
-					"provider_pubkey", provider.ProviderPubkey)
-				return rErr
-			}
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 
-			if info.Status == "error" {
-				log.Error("provider returned error status",
-					"error", info.Reason,
-					"provider_pubkey", provider.ProviderPubkey)
-				return fmt.Errorf("%s", info.Reason)
-			}
-
-			if len(info.Proof) > 0 {
-				provider.Downloaded = info.Downloaded
-				checked = append(checked, provider)
-				return nil
-			}
-
-			log.Error("provider returned empty proof",
-				"provider_pubkey", provider.ProviderPubkey,
-				"info", info)
-			return fmt.Errorf("empty proof")
-		}()
-		if fErr != nil {
-			failed = append(failed, provider)
+	rows, err := w.agent.RequestStorageInfo(timeoutCtx, queries)
+	if err != nil {
+		log.Error("failed to request storage info from agent", "error", err.Error())
+		for key := range indexByKey {
+			failed = append(failed, providers[indexByKey[key]])
 		}
+		return nil, failed
+	}
+
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		key := strings.ToLower(row.ProviderPubkey) + "|" + row.ContractAddress
+		idx, ok := indexByKey[key]
+		if !ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		provider := providers[idx]
+
+		if !row.OK {
+			log.Error("failed to notify provider",
+				"error", row.Details,
+				"provider_pubkey", provider.ProviderPubkey)
+			failed = append(failed, provider)
+			continue
+		}
+
+		if row.Status == "error" {
+			log.Error("provider returned error status",
+				"error", row.Reason,
+				"provider_pubkey", provider.ProviderPubkey)
+			failed = append(failed, provider)
+			continue
+		}
+
+		provider.Downloaded = row.Downloaded
+
+		switch mode {
+		case storageCheckNotify:
+			checked = append(checked, provider)
+		case storageCheckDownload:
+			provider.Downloaded = row.Downloaded
+			checked = append(checked, provider)
+		}
+	}
+
+	for key := range indexByKey {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		log.Error("missing provider in agent response", "provider_pubkey", providers[indexByKey[key]].ProviderPubkey)
+		failed = append(failed, providers[indexByKey[key]])
 	}
 
 	return
@@ -432,7 +471,7 @@ func NewWorker(
 	filesDb filesDb,
 	providersDb providersDb,
 	tonstorage storage,
-	provider *transport.Client,
+	agent *agentrpc.Client,
 	contractsClient contractsClient,
 	unpaidFilesLifetime time.Duration,
 	paidFilesLifetime time.Duration,
@@ -442,7 +481,7 @@ func NewWorker(
 		filesDb:             filesDb,
 		providersDb:         providersDb,
 		tonstorage:          tonstorage,
-		provider:            provider,
+		agent:               agent,
 		contractsClient:     contractsClient,
 		unpaidFilesLifetime: unpaidFilesLifetime,
 		paidFilesLifetime:   paidFilesLifetime,

@@ -57,9 +57,9 @@ services:
       BAGS_DIR_FOR_STORAGE: /bags
     ports:
       - "${BACKEND_PORT:-9092}:${BACKEND_PORT:-9092}"
-      - "${SYSTEM_ADNL_PORT:-16167}:${SYSTEM_ADNL_PORT:-16167}/udp"
     volumes:
       - bags_data:/bags
+      - ./secrets/agents-ca.crt:/run/secrets/agents-ca.crt:ro
     depends_on:
       postgres:
         condition: service_healthy
