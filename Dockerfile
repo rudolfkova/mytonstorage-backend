@@ -9,7 +9,8 @@ COPY . .
 
 # go.mod keeps a local replace for dev; production image fetches contracts from GitHub.
 RUN go mod edit -dropreplace=github.com/rudolfkova/mytonprovider-backend/contracts && \
-    go mod download
+    go mod download && \
+    go mod verify
 
 ARG BUILD_TAGS=debug
 RUN --mount=type=cache,target=/go/pkg/mod \
