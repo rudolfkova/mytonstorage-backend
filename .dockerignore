@@ -1,0 +1,7 @@
+.git
+go.work
+go.work.sum
+bin
+deploy/.env
+.env
+.env.*

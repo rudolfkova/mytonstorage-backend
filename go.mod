@@ -51,6 +51,7 @@ require (
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.17.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
+	github.com/rudolfkova/mytonprovider-backend/contracts v0.2.1
 	github.com/tinylib/msgp v1.2.5 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.51.0 // indirect
@@ -64,7 +65,6 @@ require (
 	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.11 // indirect
-	mytonprovider-contracts v0.0.0
 )
 
-replace mytonprovider-contracts => ../mytonprovider-backend/contracts
+replace github.com/rudolfkova/mytonprovider-backend/contracts => ../mytonprovider-backend/contracts

@@ -33,17 +33,10 @@ tasks:
           echo "Generated SYSTEM_PRIVATE_KEY in deploy/.env"
         fi
 
-  deploy:vendor-contracts:
-    desc: Copy mytonprovider-contracts for Docker build (sibling repo)
-    cmds:
-      - rm -rf .contracts-build
-      - cp -r ../mytonprovider-backend/contracts .contracts-build
-
   deploy:up:
     desc: Build and start local dev stack (postgres + tonutils-storage + backend)
     deps:
       - deploy:init
-      - deploy:vendor-contracts
     cmds:
       - docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
 
