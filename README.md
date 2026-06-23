@@ -42,6 +42,33 @@ Dev backend (`BACKEND_BUILD_TAGS=debug`) enables CORS for `http://localhost:3000
 3. `npm install && npm run dev`
 4. Keep `SYSTEM_HOST=localhost` in `deploy/.env` for TON Connect
 
+## VPS deploy (Docker Hub)
+
+**Recommended for production:** build images on a dev machine; on the VPS only `pull` + compose — no Go compile on the server.
+
+| Image | Task (dev machine) |
+|-------|-------------------|
+| backend | `BACKEND_IMAGE=<user>/mytonstorage-backend:latest task image:build:backend` |
+| tonutils-storage | `TONUTILS_STORAGE_IMAGE=<user>/mytonutils-storage:v1.5.1 task image:build:tonutils-storage` |
+| both | `BACKEND_IMAGE=... TONUTILS_STORAGE_IMAGE=... task image:build:push` |
+
+For a release backend image leave `BUILD_TAGS` unset (or empty).
+
+On the VPS (`deploy/docker-compose.hub.yml`, `deploy/.env.hub`, `deploy/secrets/agents-ca.crt`):
+
+```bash
+task hub:init
+nano deploy/.env.hub
+task hub:up
+task hub:health
+```
+
+Set `BACKEND_IMAGE`, `TONUTILS_STORAGE_IMAGE`, `SYSTEM_HOST=mytonstorage.org`, `AGENT_*`, and `TONUTILS_STORAGE_EXTERNAL_IP` in `.env.hub`.
+
+Frontend is deployed separately — [mytonstorage-org](https://github.com/rudolfkova/mytonstorage-org) static build + nginx.
+
+More detail: [deploy/README.md](deploy/README.md).
+
 ## Local build (no Docker)
 
 ```bash

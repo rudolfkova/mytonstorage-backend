@@ -73,6 +73,132 @@ tasks:
         curl -fsS "http://127.0.0.1:${PORT}/health"
         echo
 
+  hub:init:
+    desc: Create deploy/.env.hub from example and generate SYSTEM_PRIVATE_KEY if needed
+    cmds:
+      - mkdir -p deploy/secrets
+      - |
+        if [ ! -f deploy/.env.hub ]; then
+          cp deploy/.env.hub.example deploy/.env.hub
+          echo "Created deploy/.env.hub from deploy/.env.hub.example"
+        else
+          echo "deploy/.env.hub already exists"
+        fi
+      - |
+        if grep -q '^SYSTEM_PRIVATE_KEY=replace-with-openssl-rand-hex-32' deploy/.env.hub; then
+          KEY="$(openssl rand -hex 32)"
+          sed -i "s/^SYSTEM_PRIVATE_KEY=.*/SYSTEM_PRIVATE_KEY=${KEY}/" deploy/.env.hub
+          echo "Generated SYSTEM_PRIVATE_KEY in deploy/.env.hub"
+        fi
+      - |
+        if [ ! -f deploy/secrets/agents-ca.crt ]; then
+          echo "Place CA cert into deploy/secrets/agents-ca.crt"
+        fi
+
+  hub:up:
+    desc: Pull and start deploy stack from Docker Hub images (no local build)
+    deps:
+      - hub:init
+    cmds:
+      - docker compose --env-file deploy/.env.hub -f deploy/docker-compose.hub.yml up -d
+
+  hub:down:
+    desc: Stop Docker Hub deploy stack (keep volumes)
+    cmds:
+      - docker compose --env-file deploy/.env.hub -f deploy/docker-compose.hub.yml down
+
+  hub:ps:
+    desc: Show Docker Hub compose service status
+    cmds:
+      - docker compose --env-file deploy/.env.hub -f deploy/docker-compose.hub.yml ps
+
+  hub:logs:
+    desc: Follow logs for Docker Hub compose services
+    cmds:
+      - docker compose --env-file deploy/.env.hub -f deploy/docker-compose.hub.yml logs -f
+
+  hub:logs:backend:
+    desc: Follow backend logs only (Docker Hub stack)
+    cmds:
+      - docker compose --env-file deploy/.env.hub -f deploy/docker-compose.hub.yml logs -f backend
+
+  hub:health:
+    desc: Check backend /health endpoint (Docker Hub stack)
+    cmds:
+      - |
+        set -a
+        # shellcheck disable=SC1091
+        . deploy/.env.hub
+        set +a
+        PORT="${BACKEND_PORT:-9092}"
+        curl -fsS "http://127.0.0.1:${PORT}/health"
+        echo
+
+  image:build:backend:
+    desc: Build backend image locally (set BACKEND_IMAGE; optional BUILD_TAGS for release leave empty)
+    cmds:
+      - |
+        if [ -z "${BACKEND_IMAGE:-}" ]; then
+          echo "BACKEND_IMAGE is required, e.g. BACKEND_IMAGE=user/mytonstorage-backend:latest task image:build:backend"
+          exit 1
+        fi
+      - |
+        docker build -f Dockerfile \
+          --build-arg BUILD_TAGS="${BUILD_TAGS:-}" \
+          -t "${BACKEND_IMAGE}" .
+
+  image:build:tonutils-storage:
+    desc: Build tonutils-storage image locally (set TONUTILS_STORAGE_IMAGE)
+    cmds:
+      - |
+        if [ -z "${TONUTILS_STORAGE_IMAGE:-}" ]; then
+          echo "TONUTILS_STORAGE_IMAGE is required, e.g. TONUTILS_STORAGE_IMAGE=user/mytonutils-storage:v1.5.1 task image:build:tonutils-storage"
+          exit 1
+        fi
+      - |
+        docker build -f deploy/tonutils-storage.Dockerfile \
+          --build-arg TONUTILS_STORAGE_VERSION="${TONUTILS_STORAGE_VERSION:-v1.5.1}" \
+          -t "${TONUTILS_STORAGE_IMAGE}" \
+          deploy
+
+  image:build:
+    desc: Build backend and tonutils-storage images (set BACKEND_IMAGE and TONUTILS_STORAGE_IMAGE)
+    deps:
+      - image:build:backend
+      - image:build:tonutils-storage
+
+  image:push:backend:
+    desc: Push prebuilt backend image (set BACKEND_IMAGE)
+    cmds:
+      - |
+        if [ -z "${BACKEND_IMAGE:-}" ]; then
+          echo "BACKEND_IMAGE is required"
+          exit 1
+        fi
+      - docker push "${BACKEND_IMAGE}"
+
+  image:push:tonutils-storage:
+    desc: Push prebuilt tonutils-storage image (set TONUTILS_STORAGE_IMAGE)
+    cmds:
+      - |
+        if [ -z "${TONUTILS_STORAGE_IMAGE:-}" ]; then
+          echo "TONUTILS_STORAGE_IMAGE is required"
+          exit 1
+        fi
+      - docker push "${TONUTILS_STORAGE_IMAGE}"
+
+  image:push:
+    desc: Push backend and tonutils-storage images
+    deps:
+      - image:push:backend
+      - image:push:tonutils-storage
+
+  image:build:push:
+    desc: Build and push backend + tonutils-storage images
+    deps:
+      - image:build
+      - image:push
+
   deploy:storage:list:
     desc: List bags in tonutils-storage via HTTP API
     cmds:
