@@ -195,9 +195,9 @@ tasks:
 
   image:build:push:
     desc: Build and push backend + tonutils-storage images
-    deps:
-      - image:build
-      - image:push
+    cmds:
+      - task: image:build
+      - task: image:push
 
   deploy:storage:list:
     desc: List bags in tonutils-storage via HTTP API

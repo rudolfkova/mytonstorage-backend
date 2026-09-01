@@ -238,6 +238,7 @@ func run() (err error) {
 		ReadTimeout:  10 * time.Minute,
 		WriteTimeout: 10 * time.Minute,
 		BodyLimit:    4 << 30, // 4 GiB
+		ProxyHeader:  "X-Real-IP",
 
 		/*
 			DisablePreParseMultipartForm выключает парсинг multipart form на уровне valyala/fasthttp,
