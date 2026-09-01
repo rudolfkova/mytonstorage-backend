@@ -215,6 +215,13 @@ tasks:
     cmds:
       - go mod tidy
 
+  mod:sum:contracts:
+    desc: Refresh go.sum checksums for contracts (run before Docker image build)
+    cmds:
+      - go mod edit -dropreplace=github.com/rudolfkova/mytonprovider-backend/contracts
+      - GOPRIVATE=github.com/rudolfkova/* go mod tidy
+      - go mod edit -replace=github.com/rudolfkova/mytonprovider-backend/contracts=../mytonprovider-backend/contracts
+
   test:build:
     desc: Verify release and debug builds compile
     cmds:
