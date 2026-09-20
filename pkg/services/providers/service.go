@@ -21,6 +21,7 @@ import (
 	tonstorage "mytonstorage-backend/pkg/clients/ton-storage"
 	"mytonstorage-backend/pkg/models"
 	v1 "mytonstorage-backend/pkg/models/api/v1"
+	"mytonstorage-backend/pkg/models/db"
 	"mytonstorage-backend/pkg/utils"
 )
 
@@ -32,6 +33,11 @@ const (
 
 type files interface {
 	IsBagExpired(ctx context.Context, bagID string, userAddress string, sec uint64) (expired bool, err error)
+	GetPaidBag(ctx context.Context, userAddress, storageContract string) (db.BagStorageContract, error)
+}
+
+type notifyQueue interface {
+	AddProviderToNotifyQueue(ctx context.Context, notifications []db.ProviderNotification) error
 }
 
 type storage interface {
@@ -41,6 +47,7 @@ type storage interface {
 type service struct {
 	files               files
 	storage             storage
+	notify              notifyQueue
 	agent               *agentrpc.Client
 	maxAllowedSpan      uint64
 	unpaidFilesLifetime time.Duration
@@ -52,6 +59,7 @@ type Providers interface {
 	FetchProvidersRatesBySize(ctx context.Context, providers []string, bagSize uint64, span uint32) (resp v1.ProviderRatesResponse)
 	InitStorageContract(ctx context.Context, info v1.InitStorageContractRequest, providers []v1.ProviderShort) (resp v1.Transaction, err error)
 	EditStorageContract(ctx context.Context, address string, amount uint64, providers []v1.ProviderShort) (resp v1.Transaction, err error)
+	NotifyProviders(ctx context.Context, userAddress, contractAddr string, providers []string) error
 
 	fetchProviderRates(ctx context.Context, providerKey string, bagSize uint64, span uint32) (offer *v1.ProviderOffer, reason string)
 }
@@ -306,6 +314,73 @@ func (s *service) EditStorageContract(ctx context.Context, contractAddr string, 
 	return
 }
 
+func (s *service) NotifyProviders(ctx context.Context, userAddress, contractAddr string, providerKeys []string) (err error) {
+	log := s.logger.With(
+		"method", "NotifyProviders",
+		"contract_address", contractAddr,
+	)
+
+	if len(providerKeys) > providersLimit {
+		log.Error("too many providers requested", slog.Int("limit", providersLimit))
+		return models.NewAppError(models.BadRequestErrorCode, "too many providers requested")
+	}
+
+	addr, err := address.ParseAddr(contractAddr)
+	if err != nil {
+		log.Error("failed to parse address", slog.String("error", err.Error()))
+		return models.NewAppError(models.BadRequestErrorCode, "invalid address")
+	}
+
+	bag, err := s.files.GetPaidBag(ctx, userAddress, addr.String())
+	if err != nil {
+		log.Error("failed to get paid bag", slog.String("error", err.Error()))
+		return models.NewAppError(models.InternalServerErrorCode, "")
+	}
+	if bag.BagID == "" && contractAddr != addr.String() {
+		bag, err = s.files.GetPaidBag(ctx, userAddress, contractAddr)
+		if err != nil {
+			log.Error("failed to get paid bag", slog.String("error", err.Error()))
+			return models.NewAppError(models.InternalServerErrorCode, "")
+		}
+	}
+	if bag.BagID == "" {
+		return models.NewAppError(models.BadRequestErrorCode, "contract not found")
+	}
+
+	seen := make(map[string]struct{}, len(providerKeys))
+	notifications := make([]db.ProviderNotification, 0, len(providerKeys))
+	for _, key := range providerKeys {
+		pk := strings.ToLower(strings.TrimSpace(key))
+		raw, dErr := hex.DecodeString(pk)
+		if dErr != nil || len(raw) != 32 {
+			log.Error("failed to decode provider address", "provider", key)
+			return models.NewAppError(models.BadRequestErrorCode, "invalid provider address")
+		}
+		if _, ok := seen[pk]; ok {
+			continue
+		}
+		seen[pk] = struct{}{}
+		notifications = append(notifications, db.ProviderNotification{
+			BagID:           bag.BagID,
+			StorageContract: bag.StorageContract,
+			ProviderPubkey:  pk,
+			Size:            bag.FilesSize,
+		})
+	}
+
+	if len(notifications) == 0 {
+		return nil
+	}
+
+	if err = s.notify.AddProviderToNotifyQueue(ctx, notifications); err != nil {
+		log.Error("failed to queue providers", slog.String("error", err.Error()))
+		return models.NewAppError(models.InternalServerErrorCode, "")
+	}
+
+	log.Info("providers queued for notify", slog.Int("count", len(notifications)))
+	return nil
+}
+
 func (s *service) fetchProviderRates(ctx context.Context, providerKey string, bagSize uint64, span uint32) (offer *v1.ProviderOffer, reason string) {
 	log := s.logger.With(
 		"method", "fetchProviderRates",
@@ -412,13 +487,14 @@ func (s *service) offerFromRatesRow(providerKey string, bagSize uint64, span uin
 	return
 }
 
-func NewService(agent *agentrpc.Client, files files, storage storage, maxAllowedSpanDays uint32, unpaidFilesLifetime time.Duration, logger *slog.Logger) Providers {
+func NewService(agent *agentrpc.Client, files files, storage storage, notify notifyQueue, maxAllowedSpanDays uint32, unpaidFilesLifetime time.Duration, logger *slog.Logger) Providers {
 	return &service{
 		agent:               agent,
 		maxAllowedSpan:      uint64(maxAllowedSpanDays) * 24 * 60 * 60,
 		unpaidFilesLifetime: unpaidFilesLifetime,
 		files:               files,
 		storage:             storage,
+		notify:              notify,
 		logger:              logger,
 	}
 }

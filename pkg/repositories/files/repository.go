@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"mytonstorage-backend/pkg/models/db"
@@ -23,6 +24,7 @@ type Repository interface {
 	GetUnpaidBags(ctx context.Context, userID string) ([]db.UserBagInfo, error)
 	IsBagExpired(ctx context.Context, bagID string, userAddress string, sec uint64) (expired bool, err error)
 	MarkBagAsPaid(ctx context.Context, bagID, userAddress, storageContract string) (int64, error)
+	GetPaidBag(ctx context.Context, userAddress, storageContract string) (db.BagStorageContract, error)
 
 	GetBagsInfoShort(ctx context.Context, bagIDs []string) ([]db.BagDescription, error)
 
@@ -250,6 +252,22 @@ func (r *repository) MarkBagAsPaid(ctx context.Context, bagID, userAddress, stor
 
 	cnt = row.RowsAffected()
 
+	return
+}
+
+func (r *repository) GetPaidBag(ctx context.Context, userAddress, storageContract string) (info db.BagStorageContract, err error) {
+	query := `
+		SELECT bu.bagid, bu.storage_contract, b.files_size
+		FROM files.bag_users bu
+			JOIN files.bags b ON b.bagid = bu.bagid
+		WHERE bu.user_address = $1
+			AND bu.storage_contract = $2
+		LIMIT 1;
+	`
+	err = r.db.QueryRow(ctx, query, userAddress, storageContract).Scan(&info.BagID, &info.StorageContract, &info.FilesSize)
+	if err == pgx.ErrNoRows {
+		err = nil
+	}
 	return
 }
 

@@ -80,6 +80,7 @@ func (h *handler) RegisterRoutes() {
 			contracts.Post("/topup", h.topupBalance)
 			contracts.Post("/withdraw", h.withdrawBalance)
 			contracts.Post("/update", h.updateProviders)
+			contracts.Post("/notify", h.notifyProviders)
 		}
 
 		{

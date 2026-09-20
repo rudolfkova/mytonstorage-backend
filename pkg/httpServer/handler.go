@@ -28,6 +28,7 @@ type providers interface {
 	FetchProvidersRatesBySize(ctx context.Context, providers []string, bagSize uint64, span uint32) (resp v1.ProviderRatesResponse)
 	InitStorageContract(ctx context.Context, info v1.InitStorageContractRequest, providers []v1.ProviderShort) (resp v1.Transaction, err error)
 	EditStorageContract(ctx context.Context, address string, amount uint64, providers []v1.ProviderShort) (resp v1.Transaction, err error)
+	NotifyProviders(ctx context.Context, userAddress, contractAddr string, providers []string) error
 }
 
 type auth interface {

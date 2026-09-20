@@ -30,6 +30,10 @@ func (c *providersCache) EditStorageContract(ctx context.Context, address string
 	return c.svc.EditStorageContract(ctx, address, amount, providers)
 }
 
+func (c *providersCache) NotifyProviders(ctx context.Context, userAddress, contractAddr string, providers []string) error {
+	return c.svc.NotifyProviders(ctx, userAddress, contractAddr, providers)
+}
+
 func (c *providersCache) fetchProviderRates(ctx context.Context, providerKey string, bagSize uint64, span uint32) (offer *v1.ProviderOffer, reason string) {
 	key := fmt.Sprintf("pr_%s_%d_%d", providerKey, bagSize, span)
 	if cached, ok := c.cache.Get(key); ok {

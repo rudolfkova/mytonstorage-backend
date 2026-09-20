@@ -189,6 +189,7 @@ func run() (err error) {
 		agentRPC,
 		filesRepo,
 		storage,
+		providerRepo,
 		config.System.MaxAllowedSpanDays,
 		config.System.UnpaidFilesLifetimePrivate,
 		logger,

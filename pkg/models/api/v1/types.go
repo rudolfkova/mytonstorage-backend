@@ -86,6 +86,11 @@ type UpdateProvidersRequest struct {
 	Span            uint32   `json:"span"`
 }
 
+type NotifyProvidersRequest struct {
+	Providers       []string `json:"providers"`
+	ContractAddress string   `json:"address"`
+}
+
 type ProviderOffer struct {
 	OfferSpan     uint64 `json:"offer_span"`
 	PricePerDay   uint64 `json:"price_per_day"`

@@ -115,6 +115,17 @@ func (m *metricsMiddleware) MarkBagAsPaid(ctx context.Context, bagID, userAddres
 	return m.repo.MarkBagAsPaid(ctx, bagID, userAddress, storageContract)
 }
 
+func (m *metricsMiddleware) GetPaidBag(ctx context.Context, userAddress, storageContract string) (info db.BagStorageContract, err error) {
+	defer func(s time.Time) {
+		labels := []string{
+			"GetPaidBag", strconv.FormatBool(err != nil),
+		}
+		m.reqCount.WithLabelValues(labels...).Add(1)
+		m.reqDuration.WithLabelValues(labels...).Observe(time.Since(s).Seconds())
+	}(time.Now())
+	return m.repo.GetPaidBag(ctx, userAddress, storageContract)
+}
+
 func (m *metricsMiddleware) GetBagsInfoShort(ctx context.Context, contracts []string) (info []db.BagDescription, err error) {
 	defer func(s time.Time) {
 		labels := []string{

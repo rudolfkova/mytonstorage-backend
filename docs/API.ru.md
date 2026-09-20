@@ -20,6 +20,7 @@
 | `POST`   | `/api/v1/contracts/topup`         | Cookie              |
 | `POST`   | `/api/v1/contracts/withdraw`      | Cookie              |
 | `POST`   | `/api/v1/contracts/update`        | Cookie              |
+| `POST`   | `/api/v1/contracts/notify`        | Cookie              |
 | `POST`   | `/api/v1/providers/offers`        | Cookie              |
 
 ---
@@ -359,6 +360,29 @@ Payload для TON Connect proof. Без авторизации.
 **Ответ `200`:** `Transaction`
 
 **Таймаут:** 16 сек на запросы к провайдерам.
+
+---
+
+### `POST /api/v1/contracts/notify`
+
+Поставить провайдеров в очередь storage request после подтверждённого `update`.
+
+**Тело:**
+
+```json
+{
+  "providers": ["<pubkey>", "..."],
+  "address": "EQ..."
+}
+```
+
+**Логика:** проверяет, что контракт принадлежит пользователю, и добавляет ключи в `providers.notifications`. Существующие записи не трогает (`ON CONFLICT DO NOTHING`). Воркер сам шлёт storage request.
+
+**Ответ `200`:** `{"status":"ok"}`
+
+**Ошибки:**
+
+- `400` — невалидный адрес, контракт не найден, невалидный pubkey
 
 ---
 

@@ -324,6 +324,32 @@ func (h *handler) updateProviders(c *fiber.Ctx) error {
 	return c.JSON(resp)
 }
 
+func (h *handler) notifyProviders(c *fiber.Ctx) error {
+	log := h.logger.With(
+		slog.String("method", c.Method()),
+		slog.String("url", c.OriginalURL()),
+	)
+
+	address, ok := c.Context().UserValue("address").(string)
+	if !ok || address == "" {
+		log.Error("no user address after successful auth")
+		return fiber.NewError(fiber.StatusInternalServerError, "")
+	}
+
+	var req v1.NotifyProvidersRequest
+	if err := c.BodyParser(&req); err != nil {
+		log.Error("failed to parse request", slog.Any("error", err))
+		return fiber.NewError(fiber.StatusBadRequest, "invalid request")
+	}
+
+	err := h.providers.NotifyProviders(c.Context(), address, req.ContractAddress, req.Providers)
+	if err != nil {
+		return errorHandler(c, err)
+	}
+
+	return okHandler(c)
+}
+
 func (h *handler) initStorageContract(c *fiber.Ctx) error {
 	log := h.logger.With(
 		slog.String("method", c.Method()),
