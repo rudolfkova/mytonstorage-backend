@@ -237,7 +237,7 @@ func run() (err error) {
 		AppName:      "mytonstorage-backend",
 		ReadTimeout:  10 * time.Minute,
 		WriteTimeout: 10 * time.Minute,
-		BodyLimit:    4 << 30, // 4 GiB
+		BodyLimit:    5 << 30, // 4 GiB file + multipart overhead
 		ProxyHeader:  "X-Real-IP",
 
 		/*
