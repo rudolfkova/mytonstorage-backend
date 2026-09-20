@@ -370,7 +370,7 @@ func (s *service) offerFromRatesRow(providerKey string, bagSize uint64, span uin
 		MaxSpan:          row.MaxSpan,
 	}
 
-	if rates.SpaceAvailableMB < bagSize {
+	if rates.SpaceAvailableMB < (bagSize+1<<20-1)>>20 {
 		reason = "not enough space"
 		return
 	}

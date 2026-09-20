@@ -65,6 +65,28 @@ Stop: `task hub:down`.
 
 Uses [docker-compose.yml](docker-compose.yml) with `task deploy:up` — compiles images locally. See root [README.md](../README.md).
 
-## Frontend
+## Frontend (separate deploy)
 
-Not included in this stack. Build [mytonstorage-org](https://github.com/rudolfkova/mytonstorage-org) and serve via nginx with `NEXT_PUBLIC_API_BASE=https://mytonstorage.org` and API proxy to `BACKEND_PORT`.
+The UI lives in [mytonstorage-frontend](https://github.com/mytonprovider/mytonstorage-frontend) and is deployed independently from this stack.
+
+**Backend + gateway** (this repo and [mytonstorage-gateway](https://github.com/mytonprovider/mytonstorage-gateway)):
+
+```bash
+task hub:up          # mytonstorage-backend — backend on ${BACKEND_PORT:-9092}
+task hub:up          # mytonstorage-gateway — gateway on ${GATEWAY_PORT:-9093}
+```
+
+**Frontend image** (built with `VITE_API_URL=https://mytonstorage.org`, `SYSTEM_HOST` must match in `deploy/.env.hub`):
+
+```bash
+task hub:init   # in mytonstorage-frontend
+task hub:up     # container on ${PORT:-8082}
+```
+
+**Host nginx** on `mytonstorage.org` (TLS outside compose):
+
+- `location /api/v1/gateway/` → gateway (e.g. `127.0.0.1:9093`)
+- `location /api/` → backend (`127.0.0.1:9092`)
+- `location /` → frontend container (`127.0.0.1:8082`)
+
+Provider catalog calls go from the browser to `https://mytonprovider.org` (`VITE_MTPO_URL`); no change to this backend stack.

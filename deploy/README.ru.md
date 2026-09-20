@@ -52,6 +52,28 @@ CA агентов: `deploy/secrets/agents-ca.crt` — см. [secrets/README.md](
 
 [docker-compose.yml](docker-compose.yml) + `task deploy:up` — сборка на месте. См. [README.ru.md](../README.ru.md).
 
-## Фронтенд
+## Фронтенд (отдельный деплой)
 
-Отдельно: [mytonstorage-org](https://github.com/rudolfkova/mytonstorage-org), статика + nginx, `NEXT_PUBLIC_API_BASE=https://mytonstorage.org`.
+UI — репозиторий [mytonstorage-frontend](https://github.com/mytonprovider/mytonstorage-frontend), поднимается **отдельно** от backend.
+
+**Backend + gateway** (этот репо и [mytonstorage-gateway](https://github.com/mytonprovider/mytonstorage-gateway)):
+
+```bash
+task hub:up          # mytonstorage-backend — backend на ${BACKEND_PORT:-9092}
+task hub:up          # mytonstorage-gateway — gateway на ${GATEWAY_PORT:-9093}
+```
+
+**Фронт** (образ с `VITE_API_URL=https://mytonstorage.org`; в `deploy/.env.hub` — `SYSTEM_HOST=mytonstorage.org`):
+
+```bash
+task hub:init   # в mytonstorage-frontend
+task hub:up     # контейнер на ${PORT:-8082}
+```
+
+**Nginx на хосте** для `mytonstorage.org`:
+
+- `location /api/v1/gateway/` → gateway (`127.0.0.1:9093`)
+- `location /api/` → backend (`127.0.0.1:9092`)
+- `location /` → frontend (`127.0.0.1:8082`)
+
+Каталог провайдеров — с `https://mytonprovider.org` (`VITE_MTPO_URL`), backend stack не меняется.
