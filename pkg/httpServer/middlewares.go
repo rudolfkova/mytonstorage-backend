@@ -6,20 +6,22 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+
+	"mytonstorage-backend/pkg/models"
 )
 
 func (h *handler) userAuthMiddleware(c *fiber.Ctx) error {
 	cookie := c.Cookies("session_id")
 	parts := strings.SplitN(cookie, ":", 2)
 	if len(parts) != 2 {
-		return errorHandler(c, fiber.NewError(fiber.StatusUnauthorized, "unauthorized"))
+		return ErrorHandler(c, fiber.NewError(fiber.StatusUnauthorized, models.ErrMsgUnauthorized))
 	}
 
 	signature, sessionData := parts[0], parts[1]
 
 	addr, err := h.auth.Authenticate(c.Context(), signature, sessionData)
 	if err != nil {
-		return errorHandler(c, fiber.NewError(fiber.StatusUnauthorized, "unauthorized"))
+		return ErrorHandler(c, fiber.NewError(fiber.StatusUnauthorized, models.ErrMsgUnauthorized))
 	}
 
 	c.Context().SetUserValue("address", addr)
@@ -30,7 +32,7 @@ func (h *handler) userAuthMiddleware(c *fiber.Ctx) error {
 func (h *handler) adminAuthMiddleware(c *fiber.Ctx) error {
 	accessToken := c.Get("Authorization")
 	if accessToken == "" {
-		return errorHandler(c, fiber.NewError(fiber.StatusUnauthorized, "unauthorized"))
+		return ErrorHandler(c, fiber.NewError(fiber.StatusUnauthorized, models.ErrMsgUnauthorized))
 	}
 
 	if strings.HasPrefix(strings.ToLower(accessToken), "bearer ") {
@@ -41,7 +43,7 @@ func (h *handler) adminAuthMiddleware(c *fiber.Ctx) error {
 	tokenHash := fmt.Sprintf("%x", hash[:])
 
 	if _, exists := h.adminAuthTokens[tokenHash]; !exists {
-		return errorHandler(c, fiber.NewError(fiber.StatusForbidden, "forbidden"))
+		return ErrorHandler(c, fiber.NewError(fiber.StatusForbidden, models.ErrMsgForbidden))
 	}
 
 	return c.Next()

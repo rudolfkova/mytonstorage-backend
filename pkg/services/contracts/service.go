@@ -39,7 +39,7 @@ func (s *service) WithdrawBalance(ctx context.Context, userAddress string, req v
 	addr, err := address.ParseAddr(req.ContractAddress)
 	if err != nil {
 		s.logger.Error("failed to parse contract address", slog.String("error", err.Error()))
-		err = models.NewAppError(models.BadRequestErrorCode, "invalid contract address")
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidContractAddress)
 		return
 	}
 

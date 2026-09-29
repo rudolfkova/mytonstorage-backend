@@ -42,13 +42,13 @@ func (s *service) Login(ctx context.Context, info v1.LoginInfo) (sessionID strin
 	addr, err := address.ParseRawAddr(info.Address)
 	if err != nil {
 		logger.Error("failed to parse address", slog.Any("error", err))
-		err = models.NewAppError(models.BadRequestErrorCode, "invalid address")
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidAddress)
 		return
 	}
 
 	if vErr := s.verifier.VerifyProof(ctx, addr, info.Proof, s.GetData(), info.StateInit); vErr != nil {
 		logger.Error("failed to verify proof", slog.Any("error", vErr))
-		err = models.NewAppError(models.BadRequestErrorCode, "invalid proof")
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidProof)
 		return
 	}
 
@@ -71,21 +71,21 @@ func (s *service) Authenticate(ctx context.Context, signature, sessionData strin
 	sigBytes, err := hex.DecodeString(signature)
 	if err != nil || !ed25519.Verify(s.key.Public().(ed25519.PublicKey), signedMessage, sigBytes) {
 		logger.Error("failed to verify signature", slog.Any("error", err))
-		err = models.NewAppError(models.UnauthorizedErrorCode, "invalid signature")
+		err = models.NewAppError(models.UnauthorizedErrorCode, models.ErrMsgInvalidSignature)
 		return
 	}
 
 	dataParts := strings.SplitN(sessionData, ":", 2)
 	if len(dataParts) != 2 {
 		logger.Error("invalid session data format")
-		err = models.NewAppError(models.BadRequestErrorCode, "invalid session")
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidSession)
 		return
 	}
 
 	a, err := address.ParseAddr(dataParts[1])
 	if err != nil {
 		logger.Error("failed to parse address", slog.Any("error", err))
-		err = models.NewAppError(models.BadRequestErrorCode, "invalid address")
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidAddress)
 		return
 	}
 

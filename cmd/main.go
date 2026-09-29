@@ -18,9 +18,9 @@ import (
 	"github.com/xssnick/tonutils-go/ton"
 	"github.com/xssnick/tonutils-go/ton/wallet"
 
+	"mytonstorage-backend/pkg/clients/agentrpc"
 	tonclient "mytonstorage-backend/pkg/clients/ton"
 	tonstorage "mytonstorage-backend/pkg/clients/ton-storage"
-	"mytonstorage-backend/pkg/clients/agentrpc"
 	"mytonstorage-backend/pkg/httpServer"
 	filesRepository "mytonstorage-backend/pkg/repositories/files"
 	providersRepository "mytonstorage-backend/pkg/repositories/providers"
@@ -149,7 +149,7 @@ func run() (err error) {
 	agentRPC, err := agentrpc.New(agentrpc.Config{
 		Endpoints:      agentrpc.ParseEndpointsCSV(config.Agents.Endpoints),
 		AuthToken:      config.Agents.AuthToken,
-		CACertFile:       config.Agents.CACertFile,
+		CACertFile:     config.Agents.CACertFile,
 		RequestTimeout: time.Duration(config.Agents.RequestTimeoutMs) * time.Millisecond,
 	})
 	if err != nil {
@@ -240,6 +240,7 @@ func run() (err error) {
 		WriteTimeout: 10 * time.Minute,
 		BodyLimit:    5 << 30, // 4 GiB file + multipart overhead
 		ProxyHeader:  "X-Real-IP",
+		ErrorHandler: httpServer.ErrorHandler,
 
 		/*
 			DisablePreParseMultipartForm выключает парсинг multipart form на уровне valyala/fasthttp,

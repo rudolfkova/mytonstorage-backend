@@ -3,7 +3,6 @@ package files
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -80,26 +79,26 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 	canUpload, err := s.files.CanUpload(ctx, userAddr, uint64(s.unpaidFilesLifetime.Seconds()))
 	if err != nil {
 		log.Error("Failed to get unpaid bags", slog.Any("error", err))
-		err = models.NewAppError(models.InternalServerErrorCode, "")
+		err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedCheckUnpaidBags)
 		return
 	}
 
 	if !canUpload {
-		err = models.NewAppError(models.BadRequestErrorCode, "you have unpaid bags")
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgYouHaveUnpaidBags)
 		return info, err
 	}
 
 	err = s.validateAvailableSpace(ctx, size)
 	if err != nil {
 		log.Error("Not enough disk space", slog.Any("error", err))
-		err = models.NewAppError(models.ServiceUnavailableCode, "")
+		err = models.NewAppError(models.ServiceUnavailableCode, models.ErrMsgNotEnoughDiskSpace)
 		return info, err
 	}
 
 	maxFilesCount, err := s.getLimits(ctx)
 	if err != nil {
 		log.Error("Failed to get limits", slog.Any("error", err))
-		err = models.NewAppError(models.InternalServerErrorCode, "")
+		err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedReadUploadLimits)
 		return info, err
 	}
 
@@ -107,14 +106,14 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 	id, uErr := uuid.NewV6()
 	if uErr != nil {
 		log.Error("Failed to generate UUID", slog.Any("error", uErr))
-		err = models.NewAppError(models.InternalServerErrorCode, "")
+		err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedPrepareUploadDir)
 		return info, err
 	}
 
 	dstPath := filepath.Join(s.storageDir, id.String())
 	if oErr := os.MkdirAll(dstPath, 0755); oErr != nil {
 		log.Error("Failed to create directory", slog.Any("error", oErr))
-		err = models.NewAppError(models.InternalServerErrorCode, "")
+		err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedPrepareUploadDir)
 		return info, err
 	}
 
@@ -139,7 +138,7 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 		}
 		if err != nil {
 			log.Error("failed to read part", slog.Any("error", err))
-			return info, fiber.NewError(fiber.StatusBadRequest, "invalid multipart")
+			return info, fiber.NewError(fiber.StatusBadRequest, models.ErrMsgInvalidMultipart)
 		}
 
 		name := part.FormName()
@@ -148,7 +147,7 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 		}
 
 		if maxFilesCount > 0 && fileCount >= maxFilesCount {
-			msg := fmt.Sprintf("too many files (max %d)", maxFilesCount)
+			msg := models.ErrMsgTooManyFiles(maxFilesCount)
 			log.Error(msg, "error", err, "file_count", fileCount)
 			return info, fiber.NewError(fiber.StatusBadRequest, msg)
 		}
@@ -161,7 +160,7 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 		lastFileName, err = sanitizePath(lastFileName)
 		if err != nil {
 			log.Error("Failed to sanitize filename", "error", err, "filename", lastFileName)
-			return info, fiber.NewError(fiber.StatusBadRequest, "invalid filename")
+			return info, fiber.NewError(fiber.StatusBadRequest, models.ErrMsgInvalidFilename)
 		}
 
 		// Write file to disk
@@ -170,9 +169,8 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 
 			fileData, err := io.ReadAll(part)
 			if err != nil {
-				msg := fmt.Sprintf("failed to read file %s part", lastFileName)
-				log.Error(msg, "error", err, "filename", lastFileName)
-				return info, fiber.NewError(fiber.StatusBadRequest, msg)
+				log.Error("failed to read file part", "error", err, "filename", lastFileName)
+				return info, fiber.NewError(fiber.StatusBadRequest, models.ErrMsgFailedReadFile)
 			}
 
 			if strings.Contains(lastFileName, "/") || strings.Contains(lastFileName, "\\") {
@@ -187,13 +185,13 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 			err = saveFileToDisk(dstPath, lastFileName, fileData)
 			if err != nil {
 				log.Error("failed to save file to disk", "error", err, "filename", lastFileName)
-				return info, fiber.NewError(fiber.StatusInternalServerError, "internal error")
+				return info, fiber.NewError(fiber.StatusInternalServerError, models.ErrMsgFailedSaveFile)
 			}
 		} else if name == "description" && description == "" {
 			buf := new(bytes.Buffer)
 			_, err := io.CopyN(buf, part, 10<<20)
 			if err != nil && err != io.EOF {
-				return info, fiber.NewError(fiber.StatusBadRequest, "description too large")
+				return info, fiber.NewError(fiber.StatusBadRequest, models.ErrMsgDescriptionTooLarge)
 			}
 
 			description = buf.String()
@@ -205,9 +203,8 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 	}
 
 	if fileCount == 0 {
-		msg := "no files found"
-		log.Error(msg, "error", err)
-		return info, fiber.NewError(fiber.StatusBadRequest, msg)
+		log.Error(models.ErrMsgNoFilesFound, "error", err)
+		return info, fiber.NewError(fiber.StatusBadRequest, models.ErrMsgNoFilesFound)
 	}
 
 	path := filepath.Join(dstPath, rootDir)
@@ -232,7 +229,7 @@ func (s *service) AddFiles(ctx context.Context, mr *multipart.Reader, size uint6
 	}, userAddr)
 	if err != nil {
 		log.Error("Failed to save bag info to database", "error", err.Error())
-		err = models.NewAppError(models.InternalServerErrorCode, "")
+		err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedSaveBag)
 		return info, err
 	}
 
@@ -262,7 +259,7 @@ func (s *service) DeleteBag(ctx context.Context, bagID string, userAddr string) 
 	_, err := s.files.RemoveUserBagRelation(ctx, bagID, userAddr)
 	if err != nil {
 		log.Error("Failed to remove bag relation", "error", err)
-		return models.NewAppError(models.InternalServerErrorCode, "")
+		return models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedDeleteBag)
 	}
 
 	// NOTE: File will be removed automatically by RemoveUnpaidFiles worker
@@ -280,13 +277,13 @@ func (s *service) MarkBagAsPaid(ctx context.Context, bagID, userAddress, storage
 	addr, err := address.ParseAddr(storageContract)
 	if err != nil {
 		log.Error("Failed to parse storage contract address", "error", err)
-		return models.NewAppError(models.BadRequestErrorCode, "invalid contract address")
+		return models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidContractAddress)
 	}
 
 	_, err = s.files.MarkBagAsPaid(ctx, bagID, userAddress, addr.String())
 	if err != nil {
 		log.Error("Failed to mark bag as paid", "error", err)
-		return models.NewAppError(models.InternalServerErrorCode, "")
+		return models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedMarkBagPaid)
 	}
 
 	log.Info("Bag deleted by user successfully", slog.String("bag_id", bagID))
@@ -302,7 +299,7 @@ func (s *service) GetUnpaidBags(ctx context.Context, userAddr string) (info v1.U
 	unpaidBags, err := s.files.GetUnpaidBags(ctx, userAddr)
 	if err != nil {
 		log.Error("Failed to get unpaid bags", "error", err)
-		err = models.NewAppError(models.InternalServerErrorCode, "")
+		err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedGetUnpaidBags)
 		return
 	}
 
@@ -342,7 +339,7 @@ func (s *service) GetBagsInfoShort(ctx context.Context, contracts []string) (inf
 	desc, err := s.files.GetBagsInfoShort(ctx, contracts)
 	if err != nil {
 		log.Error("Failed to get bag descriptions", "error", err)
-		return nil, models.NewAppError(models.InternalServerErrorCode, "")
+		return nil, models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedGetBagDetails)
 	}
 
 	info = make([]v1.BagInfoShort, 0, len(desc))
@@ -363,7 +360,7 @@ func (s *service) saveToTONStorage(ctx context.Context, path, description string
 	bagid, err := s.tonstorage.Create(ctx, description, path)
 	if err != nil {
 		log.Error("Failed to create file in storage", slog.Any("error", err))
-		err = models.NewAppError(models.InternalServerErrorCode, "")
+		err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedCreateBag)
 		return
 	}
 
@@ -371,7 +368,7 @@ func (s *service) saveToTONStorage(ctx context.Context, path, description string
 	info, err = s.tonstorage.GetBag(ctx, bagid)
 	if err != nil {
 		log.Error("Failed to get bag info", "error", err.Error())
-		err = models.NewAppError(models.InternalServerErrorCode, "")
+		err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedGetBagInfo)
 		return
 	}
 

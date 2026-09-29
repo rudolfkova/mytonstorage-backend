@@ -71,8 +71,8 @@ func (s *service) FetchProvidersRates(ctx context.Context, req v1.OffersRequest)
 		"providers", req.Providers)
 
 	if len(req.Providers) > providersLimit {
-		log.Error("too many providers requested", slog.Int("limit", providersLimit))
-		err = models.NewAppError(models.BadRequestErrorCode, "too many providers requested")
+		log.Error(models.ErrMsgTooManyProvidersRequested, slog.Int("limit", providersLimit))
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgTooManyProvidersRequested)
 		return
 	}
 
@@ -84,8 +84,8 @@ func (s *service) FetchProvidersRates(ctx context.Context, req v1.OffersRequest)
 	if bagSize == 0 {
 		details, bErr := s.storage.GetBag(ctx, req.BagID)
 		if bErr != nil {
-			log.Error("failed to get bag details", slog.String("error", bErr.Error()))
-			err = models.NewAppError(models.StorageExpiredCode, "probably bag is expired")
+			log.Error(models.ErrMsgFailedGetBagDetails, slog.String("error", bErr.Error()))
+			err = models.NewAppError(models.StorageExpiredCode, models.ErrMsgProbablyBagExpired)
 			return
 		}
 
@@ -147,8 +147,8 @@ func (s *service) InitStorageContract(ctx context.Context, info v1.InitStorageCo
 		"amount", info.Amount)
 
 	if len(providers) > providersLimit {
-		log.Error("too many providers requested", slog.Int("limit", providersLimit))
-		err = models.NewAppError(models.BadRequestErrorCode, "too many providers requested")
+		log.Error(models.ErrMsgTooManyProvidersRequested, slog.Int("limit", providersLimit))
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgTooManyProvidersRequested)
 		return
 	}
 
@@ -159,48 +159,48 @@ func (s *service) InitStorageContract(ctx context.Context, info v1.InitStorageCo
 	ownerAddr, err := address.ParseAddr(info.OwnerAddress)
 	if err != nil {
 		log.Error("failed to parse owner address", slog.String("error", err.Error()))
-		err = models.NewAppError(models.BadRequestErrorCode, "invalid owner address")
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidOwnerAddress)
 		return
 	}
 
 	expired, err := s.files.IsBagExpired(ctx, info.BagID, ownerAddr.String(), uint64(s.unpaidFilesLifetime.Seconds()))
 	if err != nil {
 		log.Error("failed to check if bag is expired", slog.String("error", err.Error()))
-		err = models.NewAppError(models.BadRequestErrorCode, "file expired")
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgFileExpired)
 		return
 	}
 
 	if expired {
-		log.Error("bag is expired", slog.String("bag_id", info.BagID))
-		err = models.NewAppError(models.BadRequestErrorCode, "bag is expired")
+		log.Error(models.ErrMsgBagExpired, slog.String("bag_id", info.BagID))
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgBagExpired)
 		return
 	}
 
 	details, err := s.storage.GetBag(ctx, info.BagID)
 	if err != nil {
-		log.Error("failed to get bag details", slog.String("error", err.Error()))
-		err = models.NewAppError(models.ServiceUnavailableCode, "failed to get bag details")
+		log.Error(models.ErrMsgFailedGetBagDetails, slog.String("error", err.Error()))
+		err = models.NewAppError(models.ServiceUnavailableCode, models.ErrMsgFailedGetBagDetails)
 		return
 	}
 
 	merkle, err := hex.DecodeString(details.MerkleHash)
 	if err != nil {
 		log.Error("failed to decode merkle hash", slog.String("error", err.Error()))
-		err = models.NewAppError(models.InternalServerErrorCode, "")
+		err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedDecodeBagData)
 		return
 	}
 
 	torrentHash, err := hex.DecodeString(info.BagID)
 	if err != nil {
 		log.Error("failed to decode torrent hash", slog.String("error", err.Error()))
-		err = models.NewAppError(models.InternalServerErrorCode, "")
+		err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedDecodeBagData)
 		return
 	}
 
 	addr, sx, _, err := contract.PrepareV1DeployData(torrentHash, merkle, details.BagSize, details.PieceSize, ownerAddr, nil)
 	if err != nil {
-		log.Error("failed to prepare contract deploy data", slog.String("error", err.Error()))
-		err = models.NewAppError(models.ServiceUnavailableCode, "failed to prepare contract deploy data")
+		log.Error(models.ErrMsgFailedPrepareDeployData, slog.String("error", err.Error()))
+		err = models.NewAppError(models.ServiceUnavailableCode, models.ErrMsgFailedPrepareDeployData)
 		return
 	}
 
@@ -211,14 +211,14 @@ func (s *service) InitStorageContract(ctx context.Context, info v1.InitStorageCo
 		d, dErr := hex.DecodeString(p.Pubkey)
 		if dErr != nil {
 			log.Error("failed to decode provider address", slog.String("error", dErr.Error()))
-			err = models.NewAppError(models.BadRequestErrorCode, "invalid provider address")
+			err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidProviderAddress)
 			return
 		}
 
 		pAddr := address.NewAddress(0, 0, d)
 		if pAddr == nil {
 			log.Error("failed to parse provider address", "provider", p.Pubkey)
-			err = models.NewAppError(models.BadRequestErrorCode, "invalid provider address")
+			err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidProviderAddress)
 			return
 		}
 
@@ -231,15 +231,15 @@ func (s *service) InitStorageContract(ctx context.Context, info v1.InitStorageCo
 
 	_, stateInit, body, err := contract.PrepareV1DeployData(torrentHash, merkle, details.BagSize, details.PieceSize, ownerAddr, prs)
 	if err != nil {
-		log.Error("failed to prepare contract deploy data", slog.String("error", err.Error()))
-		err = models.NewAppError(models.ServiceUnavailableCode, "failed to prepare contract deploy data")
+		log.Error(models.ErrMsgFailedPrepareDeployData, slog.String("error", err.Error()))
+		err = models.NewAppError(models.ServiceUnavailableCode, models.ErrMsgFailedPrepareDeployData)
 		return
 	}
 
 	siCell, err := tlb.ToCell(stateInit)
 	if err != nil {
 		log.Error("failed to convert state init to cell", slog.String("error", err.Error()))
-		err = models.NewAppError(models.ServiceUnavailableCode, "failed to parse state init")
+		err = models.NewAppError(models.ServiceUnavailableCode, models.ErrMsgFailedParseStateInit)
 		return
 	}
 
@@ -265,7 +265,7 @@ func (s *service) EditStorageContract(ctx context.Context, contractAddr string, 
 	addr, err := address.ParseAddr(contractAddr)
 	if err != nil {
 		log.Error("failed to parse address", slog.String("error", err.Error()))
-		err = models.NewAppError(models.BadRequestErrorCode, "invalid address")
+		err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidAddress)
 		return
 	}
 
@@ -274,14 +274,14 @@ func (s *service) EditStorageContract(ctx context.Context, contractAddr string, 
 		d, dErr := hex.DecodeString(p.Pubkey)
 		if dErr != nil {
 			log.Error("failed to decode provider address", slog.String("error", dErr.Error()))
-			err = models.NewAppError(models.BadRequestErrorCode, "invalid provider address")
+			err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidProviderAddress)
 			return
 		}
 
 		pAddr := address.NewAddress(0, 0, d)
 		if pAddr == nil {
 			log.Error("failed to parse provider address", "provider", p.Pubkey)
-			err = models.NewAppError(models.BadRequestErrorCode, "invalid provider address")
+			err = models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidProviderAddress)
 			return
 		}
 
@@ -291,7 +291,7 @@ func (s *service) EditStorageContract(ctx context.Context, contractAddr string, 
 				MustStoreBigCoins(big.NewInt(int64(p.PricePerMBDay))).
 				EndCell())
 		if err != nil {
-			err = models.NewAppError(models.InternalServerErrorCode, "failed to set provider data")
+			err = models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedSetProviderData)
 			return
 		}
 	}
@@ -321,30 +321,30 @@ func (s *service) NotifyProviders(ctx context.Context, userAddress, contractAddr
 	)
 
 	if len(providerKeys) > providersLimit {
-		log.Error("too many providers requested", slog.Int("limit", providersLimit))
-		return models.NewAppError(models.BadRequestErrorCode, "too many providers requested")
+		log.Error(models.ErrMsgTooManyProvidersRequested, slog.Int("limit", providersLimit))
+		return models.NewAppError(models.BadRequestErrorCode, models.ErrMsgTooManyProvidersRequested)
 	}
 
 	addr, err := address.ParseAddr(contractAddr)
 	if err != nil {
 		log.Error("failed to parse address", slog.String("error", err.Error()))
-		return models.NewAppError(models.BadRequestErrorCode, "invalid address")
+		return models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidAddress)
 	}
 
 	bag, err := s.files.GetPaidBag(ctx, userAddress, addr.String())
 	if err != nil {
 		log.Error("failed to get paid bag", slog.String("error", err.Error()))
-		return models.NewAppError(models.InternalServerErrorCode, "")
+		return models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedGetPaidBag)
 	}
 	if bag.BagID == "" && contractAddr != addr.String() {
 		bag, err = s.files.GetPaidBag(ctx, userAddress, contractAddr)
 		if err != nil {
 			log.Error("failed to get paid bag", slog.String("error", err.Error()))
-			return models.NewAppError(models.InternalServerErrorCode, "")
+			return models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedGetPaidBag)
 		}
 	}
 	if bag.BagID == "" {
-		return models.NewAppError(models.BadRequestErrorCode, "contract not found")
+		return models.NewAppError(models.BadRequestErrorCode, models.ErrMsgContractNotFound)
 	}
 
 	seen := make(map[string]struct{}, len(providerKeys))
@@ -354,7 +354,7 @@ func (s *service) NotifyProviders(ctx context.Context, userAddress, contractAddr
 		raw, dErr := hex.DecodeString(pk)
 		if dErr != nil || len(raw) != 32 {
 			log.Error("failed to decode provider address", "provider", key)
-			return models.NewAppError(models.BadRequestErrorCode, "invalid provider address")
+			return models.NewAppError(models.BadRequestErrorCode, models.ErrMsgInvalidProviderAddress)
 		}
 		if _, ok := seen[pk]; ok {
 			continue
@@ -374,7 +374,7 @@ func (s *service) NotifyProviders(ctx context.Context, userAddress, contractAddr
 
 	if err = s.notify.AddProviderToNotifyQueue(ctx, notifications); err != nil {
 		log.Error("failed to queue providers", slog.String("error", err.Error()))
-		return models.NewAppError(models.InternalServerErrorCode, "")
+		return models.NewAppError(models.InternalServerErrorCode, models.ErrMsgFailedQueueProviders)
 	}
 
 	log.Info("providers queued for notify", slog.Int("count", len(notifications)))

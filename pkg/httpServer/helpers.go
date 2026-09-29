@@ -18,7 +18,7 @@ func (h *handler) limitReached(c *fiber.Ctx) error {
 	)
 
 	log.Warn("rate limit reached for request")
-	return fiber.NewError(fiber.StatusTooManyRequests, "too many requests, please try again later")
+	return fiber.NewError(fiber.StatusTooManyRequests, models.ErrMsgTooManyRequests)
 }
 
 func validateBagID(bagid string) bool {
@@ -43,27 +43,29 @@ func okHandler(c *fiber.Ctx) error {
 	})
 }
 
-func errorHandler(c *fiber.Ctx, err error) error {
+// ErrorHandler writes a safe JSON error response. Unknown errors never leak internal details.
+func ErrorHandler(c *fiber.Ctx, err error) error {
 	if e, ok := err.(*fiber.Error); ok {
+		msg := e.Message
+		if msg == "" {
+			msg = models.ErrMsgInternalServerError
+		}
 		return c.Status(e.Code).JSON(fiber.Map{
-			"error": e.Message,
+			"error": msg,
 		})
 	}
 
 	if appErr, ok := err.(*models.AppError); ok {
 		msg := appErr.Message
-		if appErr.Code > 500 {
-			msg = "internal server error"
+		if msg == "" {
+			msg = models.ErrMsgInternalServerError
 		}
-
 		return c.Status(appErr.Code).JSON(fiber.Map{
 			"error": msg,
 		})
 	}
 
-	errorResponse := errorResponse{
-		Error: err.Error(),
-	}
-
-	return c.Status(fiber.StatusInternalServerError).JSON(errorResponse)
+	return c.Status(fiber.StatusInternalServerError).JSON(errorResponse{
+		Error: models.ErrMsgInternalServerError,
+	})
 }
