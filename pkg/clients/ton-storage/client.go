@@ -15,6 +15,11 @@ import (
 	"time"
 )
 
+const (
+	defaultTimeout = 15 * time.Second
+	createTimeout  = 2 * time.Minute
+)
+
 type Client interface {
 	Create(ctx context.Context, description, path string) (string, error)
 	GetBag(ctx context.Context, bagId string) (*BagDetailed, error)
@@ -24,10 +29,11 @@ type Client interface {
 }
 
 type client struct {
-	base        string
-	rootPath    string
-	client      http.Client
-	credentials *Credentials
+	base         string
+	rootPath     string
+	client       http.Client
+	createClient http.Client
+	credentials  *Credentials
 }
 
 type Credentials struct {
@@ -47,7 +53,7 @@ func (c *client) Create(ctx context.Context, description, path string) (string, 
 		BagID string `json:"bag_id"`
 	}
 
-	if err := c.doRequest(ctx, "POST", "/api/v1/create", request{
+	if err := c.doRequest(ctx, &c.createClient, "POST", "/api/v1/create", request{
 		Description: description,
 		Path:        path,
 	}, &res); err != nil {
@@ -63,7 +69,7 @@ func (c *client) Create(ctx context.Context, description, path string) (string, 
 
 func (c *client) GetBag(ctx context.Context, bagId string) (*BagDetailed, error) {
 	var res BagDetailed
-	if err := c.doRequest(ctx, "GET", "/api/v1/details?bag_id="+bagId, nil, &res); err != nil {
+	if err := c.doRequest(ctx, &c.client, "GET", "/api/v1/details?bag_id="+bagId, nil, &res); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, ErrNotFound
 		}
@@ -79,7 +85,7 @@ func (c *client) GetBag(ctx context.Context, bagId string) (*BagDetailed, error)
 
 func (c *client) List(ctx context.Context) (*ListShort, error) {
 	var res ListShort
-	if err := c.doRequest(ctx, "GET", "/api/v1/list", nil, &res); err != nil {
+	if err := c.doRequest(ctx, &c.client, "GET", "/api/v1/list", nil, &res); err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return nil, ErrNotFound
 		}
@@ -99,7 +105,7 @@ func (c *client) StartDownload(ctx context.Context, bagId string, downloadAll bo
 	}
 
 	var res Result
-	if err := c.doRequest(ctx, "POST", "/api/v1/add", request{
+	if err := c.doRequest(ctx, &c.client, "POST", "/api/v1/add", request{
 		BagID:       bagId,
 		Path:        c.rootPath,
 		DownloadAll: downloadAll,
@@ -120,7 +126,7 @@ func (c *client) RemoveBag(ctx context.Context, bagId string, withFiles bool) er
 	}
 
 	var res Result
-	if err := c.doRequest(ctx, "POST", "/api/v1/remove", request{
+	if err := c.doRequest(ctx, &c.client, "POST", "/api/v1/remove", request{
 		BagID:     bagId,
 		WithFiles: withFiles,
 	}, &res); err != nil {
@@ -133,7 +139,7 @@ func (c *client) RemoveBag(ctx context.Context, bagId string, withFiles bool) er
 	return nil
 }
 
-func (c *client) doRequest(ctx context.Context, method, url string, req, resp any) error {
+func (c *client) doRequest(ctx context.Context, httpClient *http.Client, method, url string, req, resp any) error {
 	buf := &bytes.Buffer{}
 	if req != nil {
 		if err := json.NewEncoder(buf).Encode(req); err != nil {
@@ -149,7 +155,7 @@ func (c *client) doRequest(ctx context.Context, method, url string, req, resp an
 		r.SetBasicAuth(c.credentials.Login, c.credentials.Password)
 	}
 
-	res, err := c.client.Do(r)
+	res, err := httpClient.Do(r)
 	if err != nil {
 		return fmt.Errorf("failed to make request: %w", err)
 	}
@@ -178,7 +184,10 @@ func NewClient(base, rootPath string, credentials *Credentials) Client {
 		base:     base,
 		rootPath: rootPath,
 		client: http.Client{
-			Timeout: 15 * time.Second,
+			Timeout: defaultTimeout,
+		},
+		createClient: http.Client{
+			Timeout: createTimeout,
 		},
 		credentials: credentials,
 	}
