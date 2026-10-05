@@ -18,6 +18,8 @@ import (
 	v1 "mytonstorage-backend/pkg/models/api/v1"
 )
 
+const sessionCookieMaxAge = 30 * 24 * 60 * 60
+
 func (h *handler) login(c *fiber.Ctx) error {
 	log := h.logger.With(
 		slog.String("method", c.Method()),
@@ -38,6 +40,7 @@ func (h *handler) login(c *fiber.Ctx) error {
 	c.Cookie(&fiber.Cookie{
 		Name:     "session_id",
 		Value:    sessionID,
+		MaxAge:   sessionCookieMaxAge,
 		HTTPOnly: true,
 		SameSite: fiber.CookieSameSiteStrictMode,
 	})
